@@ -249,6 +249,18 @@ body {
 #regionList .empty { color: var(--muted); cursor: default; }
 #regionList li.empty:hover { background: none; }
 
+#regionStats {
+  margin: 0; white-space: pre-wrap;
+  font: 11px/1.5 ui-monospace, Menlo, monospace;
+  color: var(--fg);
+}
+#regionStats .empty { color: var(--muted); }
+.modal-head #plotExport {
+  font-size: 13px; background: var(--panel); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 9px; cursor: pointer;
+}
+.modal-head #plotExport:hover { background: #41454e; }
+
 /* ---- workspace: canvas + sidebar ---- */
 #workspace {
   flex: 1;

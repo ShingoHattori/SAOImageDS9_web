@@ -34,6 +34,7 @@
   $('plotBtn').addEventListener('click', () => plots.toggle());
   $('plotType').addEventListener('change', () => plots.render());
   $('plotClose').addEventListener('click', () => plots.close());
+  $('plotExport').addEventListener('click', () => plots.exportData());
   $('plotModal').addEventListener('click', e => { if (e.target.id === 'plotModal') plots.close(); });
   // compose the overlay stack: grid/contour → regions → crosshair
   viewer.overlay = (ctx) => {
@@ -142,6 +143,23 @@
       li.addEventListener('click', () => regions.select(r));
       ul.appendChild(li);
     });
+    renderRegionStats();
+  }
+  function renderRegionStats() {
+    const el = $('regionStats');
+    const s = (viewer.image && regions.selected) ? regions.stats(viewer.image) : null;
+    if (!s) { el.innerHTML = '<span class="empty">（領域を選択：circle/box/ellipse/polygon）</span>'; return; }
+    if (!s.npix) { el.innerHTML = '<span class="empty">領域内に有効画素なし</span>'; return; }
+    const f = v => !Number.isFinite(v) ? '–'
+      : (Math.abs(v) >= 1e4 || (Math.abs(v) < 1e-2 && v !== 0)) ? v.toExponential(3) : (Math.round(v * 1000) / 1000).toString();
+    el.textContent =
+      `npix     ${s.npix}\n` +
+      `sum      ${f(s.sum)}\n` +
+      `mean     ${f(s.mean)}\n` +
+      `median   ${f(s.median)}\n` +
+      `stddev   ${f(s.stddev)}\n` +
+      `min/max  ${f(s.min)} / ${f(s.max)}\n` +
+      `centroid ${f(s.centroidX)}, ${f(s.centroidY)}`;
   }
   renderRegionList();
 

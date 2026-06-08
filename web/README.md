@@ -40,7 +40,10 @@ SAOImage DS9 の「基本ビュワー」機能を **ブラウザネイティブ*
 - **画像処理** — Smoothing（gaussian / boxcar・半径指定）、Binning（block average, ×2/4/8）、
   Flip X / Flip Y / Rotate 90°（座標変換として実装、リージョン・オーバーレイも追従）
 - **プロット** — Histogram（画素値分布）、Horizontal/Vertical cut（カーソル行・列の断面、追従）、
-  Radial profile（中心まわりの方位平均。選択中の circle 中心を優先）
+  Radial profile（中心まわりの方位平均。選択中の circle 中心を優先）。**radial は Gaussian フィット**
+  を重ね、FWHM/σ/peak を表示。**export ボタンでプロット値を CSV 保存**
+- **領域統計** — 選択領域内の npix / sum / mean / median / stddev / min / max / centroid を
+  サイドバー Region Stats に表示（circle / box / ellipse / polygon）
 - **座標系** — image / fk5 (sexagesimal) / fk5 (degrees) / galactic を切り替えて読み取り
 - **カーソル読み取り** — ピクセル座標・ピクセル値・選択座標系での天球座標
 - **ヘッダ表示** — FITS ヘッダカードをそのまま表示

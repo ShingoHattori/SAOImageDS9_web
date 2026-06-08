@@ -197,6 +197,10 @@
       <h3>Region List</h3>
       <ul id="regionList"></ul>
     </section>
+    <section class="panel">
+      <h3>Region Stats</h3>
+      <pre id="regionStats"><span class="empty">（領域を選択）</span></pre>
+    </section>
   </aside>
 </div>
 
@@ -263,7 +267,10 @@
         </select>
         <span id="plotTitle" class="plot-title"></span>
       </span>
-      <button id="plotClose">×</button>
+      <span style="display:flex;gap:8px;align-items:center">
+        <button id="plotExport" title="プロットのデータを CSV で保存">export</button>
+        <button id="plotClose">×</button>
+      </span>
     </div>
     <canvas id="plotCanvas" width="720" height="380"></canvas>
     <div class="plot-hint">cut/radial はカーソル位置に追従（radial は選択中の circle 中心を優先）</div>

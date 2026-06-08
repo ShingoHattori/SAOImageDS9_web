@@ -32,6 +32,7 @@
     if (!this.open) return;
     const v = this.v, cv = this.els.canvas, ctx = cv.getContext('2d');
     ctx.clearRect(0, 0, cv.width, cv.height);
+    this._last = null;
     if (!v.image) return;
     const t = this.els.type.value;
     if (t === 'histogram') this._histogram(ctx, cv);
@@ -39,6 +40,64 @@
     else if (t === 'vcut') this._cut(ctx, cv, 'v');
     else if (t === 'radial') this._radial(ctx, cv);
   };
+
+  // Export the current plot's data as CSV text and trigger a download.
+  Plots.prototype.exportData = function () {
+    const d = this._last;
+    if (!d) return;
+    let out = `# ${d.title}\n${d.xlabel},${d.ylabel}\n`;
+    for (let i = 0; i < d.ys.length; i++)
+      out += `${d.xs ? d.xs[i] : i},${d.ys[i]}\n`;
+    const blob = new Blob([out], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `plot_${this.els.type.value}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  // 1-D Gaussian fit y = B + A*exp(-x^2 / 2σ^2) (centre fixed at x=0).
+  function fitGaussian(xs, ys) {
+    const pts = [];
+    for (let i = 0; i < ys.length; i++) if (Number.isFinite(ys[i])) pts.push([xs[i], ys[i]]);
+    if (pts.length < 4) return null;
+    let B = pts[pts.length - 1][1];
+    let A = pts[0][1] - B;
+    if (A === 0) return null;
+    let sigma = 1;
+    for (const [x, y] of pts) if ((y - B) <= A / 2) { sigma = x / 1.1774 || 1; break; }
+    // Gauss-Newton refinement
+    for (let iter = 0; iter < 12; iter++) {
+      let JtJ = [[0,0,0],[0,0,0],[0,0,0]], Jtr = [0,0,0];
+      for (const [x, y] of pts) {
+        const e = Math.exp(-(x*x) / (2*sigma*sigma));
+        const f = B + A*e;
+        const r = y - f;
+        const dA = e, dB = 1, dS = A*e*(x*x)/(sigma*sigma*sigma);
+        const J = [dA, dS, dB];
+        for (let a = 0; a < 3; a++) { Jtr[a] += J[a]*r; for (let b = 0; b < 3; b++) JtJ[a][b] += J[a]*J[b]; }
+      }
+      for (let i = 0; i < 3; i++) JtJ[i][i] *= 1.0001;        // tiny damping
+      const d = solve3(JtJ, Jtr);
+      if (!d) break;
+      A += d[0]; sigma += d[1]; B += d[2];
+      if (sigma < 1e-3) sigma = 1e-3;
+      if (Math.hypot(d[0], d[1], d[2]) < 1e-6) break;
+    }
+    return { A, sigma: Math.abs(sigma), B, fwhm: 2.354820045 * Math.abs(sigma) };
+  }
+  function solve3(M, v) {
+    const det = M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1])
+              - M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0])
+              + M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]);
+    if (Math.abs(det) < 1e-12) return null;
+    // Cramer's rule
+    const col = (M, i, vec) => M.map((row, r) => row.map((val, k) => k === i ? vec[r] : val));
+    const d = MM => MM[0][0]*(MM[1][1]*MM[2][2]-MM[1][2]*MM[2][1])
+                   - MM[0][1]*(MM[1][0]*MM[2][2]-MM[1][2]*MM[2][0])
+                   + MM[0][2]*(MM[1][0]*MM[2][1]-MM[1][1]*MM[2][0]);
+    return [d(col(M,0,v))/det, d(col(M,1,v))/det, d(col(M,2,v))/det];
+  }
 
   // ---- generic plot frame ----
   function frame(ctx, cv) {
@@ -113,6 +172,8 @@
     }
     axisLabels(ctx, fr, lo, hi, 0, ymax, 'pixel value', 'count');
     this._title(`histogram — ${data.length} px, ${NB} bins`);
+    const centres = []; for (let i = 0; i < NB; i++) centres.push(lo + (i + 0.5) / NB * span);
+    this._last = { title: 'histogram', xlabel: 'value', ylabel: 'count', xs: centres, ys: Array.from(bins) };
   };
 
   // ---- horizontal / vertical cut ----
@@ -135,6 +196,7 @@
     plotLine(ctx, fr, null, ys, 0, ys.length - 1, ymin, ymax, '#46d063');
     axisLabels(ctx, fr, 0, ys.length - 1, ymin, ymax, dir === 'h' ? 'x (pixel)' : 'y (pixel)', 'value');
     this._title(`${dir === 'h' ? 'horizontal' : 'vertical'} cut — ${label}`);
+    this._last = { title: `${dir}cut ${label}`, xlabel: dir === 'h' ? 'x' : 'y', ylabel: 'value', xs: null, ys };
   };
 
   // ---- radial profile ----
@@ -159,8 +221,22 @@
     const fr = frame(ctx, cv);
     const [ymin, ymax] = extent(prof);
     plotLine(ctx, fr, null, prof, 0, maxR, ymin, ymax, '#ffd24c');
+
+    // Gaussian fit overlay
+    const radii = prof.map((_, i) => i);
+    const fit = fitGaussian(radii, prof);
+    let titleExtra = '';
+    if (fit) {
+      const model = radii.map(r => fit.B + fit.A * Math.exp(-(r*r) / (2*fit.sigma*fit.sigma)));
+      ctx.save(); ctx.setLineDash([5, 3]);
+      plotLine(ctx, fr, null, model, 0, maxR, ymin, ymax, '#4c8dff');
+      ctx.restore();
+      titleExtra = `  ·  fit: FWHM=${fit.fwhm.toFixed(2)} px, σ=${fit.sigma.toFixed(2)}, peak=${(fit.A).toPrecision(3)}`;
+      this._fit = fit;
+    }
     axisLabels(ctx, fr, 0, maxR, ymin, ymax, 'radius (pixel)', 'mean');
-    this._title(`radial profile — centre (${cx.toFixed(1)}, ${cy.toFixed(1)})`);
+    this._title(`radial — centre (${cx.toFixed(1)}, ${cy.toFixed(1)})${titleExtra}`);
+    this._last = { title: `radial centre ${cx.toFixed(1)},${cy.toFixed(1)}`, xlabel: 'radius', ylabel: 'mean', xs: radii, ys: prof };
   };
 
   Plots.prototype._title = function (s) { if (this.els.title) this.els.title.textContent = s; };

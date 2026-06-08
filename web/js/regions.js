@@ -438,5 +438,45 @@
     return added;
   };
 
+  // ---- statistics of the selected region over the image ----
+  Regions.prototype._contains = function (r, ix, iy) {
+    if (r.type === 'circle') return dist(ix, iy, r.x, r.y) <= r.r;
+    if (r.type === 'ellipse') { const p = rotate(ix, iy, r.x, r.y, -r.angle); const dx = (p.x - r.x) / r.a, dy = (p.y - r.y) / r.b; return dx*dx + dy*dy <= 1; }
+    if (r.type === 'box') { const p = rotate(ix, iy, r.x, r.y, -r.angle); return Math.abs(p.x - r.x) <= r.w/2 && Math.abs(p.y - r.y) <= r.h/2; }
+    if (r.type === 'polygon') return pointInPoly(ix, iy, r.pts);
+    return false;
+  };
+
+  Regions.prototype.stats = function (image) {
+    const r = this.selected;
+    if (!r || r.type === 'line' || r.type === 'point') return null;
+    const { width: w, height: h, data } = image;
+    let bb;
+    if (r.type === 'circle') bb = [r.x - r.r, r.x + r.r, r.y - r.r, r.y + r.r];
+    else if (r.type === 'ellipse') { const m = Math.max(r.a, r.b); bb = [r.x - m, r.x + m, r.y - m, r.y + m]; }
+    else if (r.type === 'box') { const m = Math.hypot(r.w, r.h) / 2; bb = [r.x - m, r.x + m, r.y - m, r.y + m]; }
+    else { const xs = r.pts.map(p => p.x), ys = r.pts.map(p => p.y); bb = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]; }
+    const x0 = Math.max(0, Math.floor(bb[0])), x1 = Math.min(w, Math.ceil(bb[1]));
+    const y0 = Math.max(0, Math.floor(bb[2])), y1 = Math.min(h, Math.ceil(bb[3]));
+    let n = 0, sum = 0, sum2 = 0, min = Infinity, max = -Infinity, cx = 0, cy = 0, wsum = 0;
+    const vals = [];
+    for (let row = y0; row < y1; row++) for (let col = x0; col < x1; col++) {
+      const ix = col + 0.5, iy = row + 0.5;
+      if (!this._contains(r, ix, iy)) continue;
+      const v = data[row * w + col];
+      if (!Number.isFinite(v)) continue;
+      n++; sum += v; sum2 += v*v;
+      if (v < min) min = v; if (v > max) max = v;
+      const wv = v > 0 ? v : 0; cx += ix * wv; cy += iy * wv; wsum += wv;
+      vals.push(v);
+    }
+    if (!n) return { npix: 0 };
+    const mean = sum / n;
+    vals.sort((a, b) => a - b);
+    return { npix: n, sum, mean, median: vals[n >> 1],
+      stddev: Math.sqrt(Math.max(0, sum2 / n - mean * mean)), min, max,
+      centroidX: wsum ? cx / wsum : NaN, centroidY: wsum ? cy / wsum : NaN };
+  };
+
   global.Regions = Regions;
 })(window);
