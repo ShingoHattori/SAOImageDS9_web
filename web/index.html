@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DS9 Web Viewer — FITS</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header id="topbar">
+  <span class="brand">DS9 Web Viewer</span>
+  <label class="file-btn">
+    Open FITS…
+    <input type="file" id="fileInput" accept=".fits,.fit,.fts,.fz" hidden>
+  </label>
+
+  <span class="sep"></span>
+
+  <label>HDU
+    <select id="hduSelect" disabled></select>
+  </label>
+
+  <label>Scale
+    <select id="scaleSelect">
+      <option value="linear">linear</option>
+      <option value="log">log</option>
+      <option value="pow">power</option>
+      <option value="sqrt">sqrt</option>
+      <option value="squared">squared</option>
+      <option value="asinh">asinh</option>
+      <option value="sinh">sinh</option>
+      <option value="histequ">histequ</option>
+    </select>
+  </label>
+
+  <label>Limits
+    <select id="limitSelect">
+      <option value="zscale">zscale</option>
+      <option value="zmax">zmax</option>
+      <option value="minmax">minmax</option>
+      <option value="user">user</option>
+      <option value="99.5">99.5%</option>
+      <option value="99">99%</option>
+      <option value="98">98%</option>
+      <option value="95">95%</option>
+      <option value="90">90%</option>
+    </select>
+  </label>
+
+  <label>Low <input type="number" id="lowInput" step="any" class="num"></label>
+  <label>High <input type="number" id="highInput" step="any" class="num"></label>
+
+  <label>Colormap
+    <select id="cmapSelect">
+      <option value="grey">grey</option>
+      <option value="a">a</option>
+      <option value="b">b</option>
+      <option value="bb">bb</option>
+      <option value="he">he</option>
+      <option value="i8">i8</option>
+      <option value="aips0">aips0</option>
+      <option value="heat">heat</option>
+      <option value="cool">cool</option>
+      <option value="rainbow">rainbow</option>
+      <option value="standard">standard</option>
+      <option value="staircase">staircase</option>
+      <option value="color">color</option>
+      <option value="red">red</option>
+      <option value="green">green</option>
+      <option value="blue">blue</option>
+    </select>
+  </label>
+
+  <label class="chk"><input type="checkbox" id="invertChk"> invert</label>
+  <label class="chk"><input type="checkbox" id="lockChk" checked> lock scale</label>
+
+  <span class="sep"></span>
+
+  <button id="zoomInBtn" title="Zoom in">+</button>
+  <button id="zoomOutBtn" title="Zoom out">−</button>
+  <button id="zoomFitBtn" title="Zoom to fit">fit</button>
+  <button id="zoom1Btn" title="Zoom 1:1">1:1</button>
+  <button id="headerBtn" title="Show FITS header" disabled>header</button>
+</header>
+
+<div id="regionbar">
+  <span class="rb-label">Regions</span>
+  <div class="rb-tools" role="group">
+    <button data-tool="pointer" class="active" title="Select / edit">⮕</button>
+    <button data-tool="circle" title="Circle">◯</button>
+    <button data-tool="ellipse" title="Ellipse">⬭</button>
+    <button data-tool="box" title="Box">▭</button>
+    <button data-tool="line" title="Line">╱</button>
+    <button data-tool="polygon" title="Polygon (click vertices, click first to close, Esc cancel)">⬠</button>
+    <button data-tool="point" title="Point">✛</button>
+  </div>
+  <label>color
+    <select id="regionColor">
+      <option value="green">green</option>
+      <option value="red">red</option>
+      <option value="cyan">cyan</option>
+      <option value="yellow">yellow</option>
+      <option value="magenta">magenta</option>
+      <option value="white">white</option>
+      <option value="orange">orange</option>
+    </select>
+  </label>
+  <button id="regionDelete" title="Delete selected (Del)">delete</button>
+  <button id="regionClear" title="Delete all">clear</button>
+  <span class="sep"></span>
+  <button id="regionExport">export</button>
+  <label class="file-btn small">import<input type="file" id="regionImport" accept=".reg,.txt" hidden></label>
+</div>
+
+<div id="workspace">
+  <main>
+    <div id="canvasWrap">
+      <canvas id="view"></canvas>
+      <div id="dropHint">FITS ファイルをここにドラッグ &amp; ドロップ、または「Open FITS…」</div>
+    </div>
+
+    <div id="cubeBar" class="hidden">
+      <button id="cubeFirst" title="First channel">⏮</button>
+      <button id="cubePrev" title="Previous channel">◀</button>
+      <button id="cubePlay" title="Play / stop">⏯</button>
+      <button id="cubeNext" title="Next channel">▶</button>
+      <button id="cubeLast" title="Last channel">⏭</button>
+      <input type="range" id="cubeSlider" min="0" max="0" value="0">
+      <span id="cubeLabel">ch 0/0</span>
+      <span id="cubeVel" class="vel"></span>
+    </div>
+  </main>
+
+  <aside id="sidebar">
+    <section class="panel">
+      <h3>Panner</h3>
+      <canvas id="pannerCanvas" width="180" height="180"></canvas>
+    </section>
+    <section class="panel">
+      <h3>Magnifier</h3>
+      <canvas id="magCanvas" width="180" height="180"></canvas>
+    </section>
+    <section class="panel">
+      <h3>Colorbar</h3>
+      <canvas id="colorbarCanvas" width="180" height="18"></canvas>
+      <div class="cbticks"><span id="cbLow">–</span><span id="cbHigh">–</span></div>
+    </section>
+    <section class="panel">
+      <h3>Pixel Table</h3>
+      <table id="pixtable"></table>
+    </section>
+    <section class="panel">
+      <h3>Region List</h3>
+      <ul id="regionList"></ul>
+    </section>
+  </aside>
+</div>
+
+<footer id="statusbar">
+  <span id="stFile">no file</span>
+  <span id="stPos">x: –  y: –</span>
+  <span id="stValue">value: –</span>
+  <label class="coordsel">coord
+    <select id="coordSys">
+      <option value="fk5">fk5 (sexg)</option>
+      <option value="fk5deg">fk5 (deg)</option>
+      <option value="galactic">galactic</option>
+      <option value="image">image</option>
+    </select>
+  </label>
+  <span id="stWcs"></span>
+  <span id="stZoom">zoom: –</span>
+  <span id="stLimits">low/high: –</span>
+</footer>
+
+<div id="headerModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span>FITS Header</span>
+      <button id="headerClose">×</button>
+    </div>
+    <pre id="headerText"></pre>
+  </div>
+</div>
+
+<script src="js/fits.js"></script>
+<script src="js/colormap.js"></script>
+<script src="js/scale.js"></script>
+<script src="js/wcs.js"></script>
+<script src="js/viewer.js"></script>
+<script src="js/panels.js"></script>
+<script src="js/regions.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
