@@ -57,6 +57,10 @@
       this.smooth = { on: false, type: 'gaussian', radius: 2 };
       this.binFactor = 1;
       this.orient = { rot: 0, flipX: false, flipY: false };   // rot: 0/90/180/270 CCW
+      this.mode = 'image';        // 'image' | 'rgb' | '3d'
+      this.rgb = null;            // { red:{image,low,high}, green:{...}, blue:{...} }
+      this.vol = null;            // 3D volume { data, w, h, d, min, max }
+      this.view3d = { yaw: 0.6, pitch: 0.5 };
 
       this.scale = 'linear';
       this.limitMode = 'zscale';
@@ -164,13 +168,59 @@
       this.high = hi > lo ? hi : lo + 1;
     }
 
-    // Render full-resolution colormapped image to the offscreen canvas.
+    // Render full-resolution image to the offscreen canvas (dispatch by mode).
     renderImage() {
+      if (this.mode === 'rgb') return this._renderRGB();
+      if (this.mode === '3d') return this._render3D();
       if (!this.image) return;
       global.renderColormap(this.off, this.image, {
         scale: this.scale, low: this.low, high: this.high,
         cmap: this.cmap, invert: this.invert, contrast: this.contrast, bias: this.bias });
     }
+
+    // ---- RGB composite: each channel grayscale-mapped to its colour ----
+    setRGB(channels, wcs) {
+      this.mode = 'rgb';
+      this.rgb = channels;
+      this.wcs = wcs || null;
+      const ref = (channels.red || channels.green || channels.blue).image;
+      this.raw = ref; this.image = ref;       // reference for dims / readout
+      this.off.width = ref.width; this.off.height = ref.height;
+      this.contrast = 1; this.bias = 0.5;
+      this._renderRGB();
+      this.zoomFit();
+      this.draw();
+    }
+    _renderRGB() {
+      const ref = this.image, w = ref.width, h = ref.height;
+      this.off.width = w; this.off.height = h;
+      const ctx = this.off.getContext('2d');
+      const out = ctx.createImageData(w, h);
+      const px = out.data;
+      const prep = (c) => {
+        if (!c || !c.image || c.image.width !== w || c.image.height !== h) return null;
+        return { data: c.image.data, lo: c.low, span: (c.high - c.low) || 1,
+                 tf: global.Scale.makeTransfer(this.scale, c.image, c.low, c.high) };
+      };
+      const R = prep(this.rgb.red), G = prep(this.rgb.green), B = prep(this.rgb.blue);
+      const ch = (C, i) => {
+        if (!C) return 0;
+        const v = C.data[i];
+        if (!Number.isFinite(v)) return 0;
+        let u = (v - C.lo) / C.span; u = u < 0 ? 0 : u > 1 ? 1 : u;
+        return (C.tf(u) * 255 + 0.5) | 0;
+      };
+      for (let r = 0; r < h; r++) {
+        const src = r * w, dst = (h - 1 - r) * w;
+        for (let c = 0; c < w; c++) {
+          const i = src + c, o = (dst + c) * 4;
+          px[o] = ch(R, i); px[o+1] = ch(G, i); px[o+2] = ch(B, i); px[o+3] = 255;
+        }
+      }
+      ctx.putImageData(out, 0, 0);
+    }
+
+    _render3D() { /* defined below via prototype assignment */ }
 
     // ----- view transform -----
     zoomFit() {

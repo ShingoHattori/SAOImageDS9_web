@@ -259,7 +259,7 @@
     const imageHdus = parsed.filter(h => h.isImage);
     if (!imageHdus.length) { alert('表示可能な画像 HDU が見つかりませんでした。'); return; }
     saveActiveFrame();
-    const frame = { name, hdus: parsed, hduIndex: imageHdus[0].index,
+    const frame = { type: 'image', name, hdus: parsed, hduIndex: imageHdus[0].index,
       plane: 0, state: null, regions: [], regionSel: null };
     frames.push(frame);
     activateFrame(frame);
@@ -268,14 +268,30 @@
   function activateFrame(frame) {
     stopPlay();
     activeFrame = frame;
-    hdus = frame.hdus;
-    populateHduSelect();
+    regions.list = frame.regions;
+    regions.selected = frame.regionSel || null;
     $('headerBtn').disabled = false;
     $('plotBtn').disabled = false;
 
-    regions.list = frame.regions;
-    regions.selected = frame.regionSel || null;
+    if (frame.type === 'rgb') activateRGBFrame(frame);
+    else if (frame.type === '3d') activate3DFrame(frame);
+    else activateImageFrame(frame);
 
+    overlays.invalidate();
+    syncLimitInputs();
+    updateStatus();
+    $('canvasWrap').classList.add('has-image');
+    document.title = `${frame.name} — DS9 Web Viewer`;
+    renderRegionList();
+    updateFrameBar();
+    viewer.draw();
+  }
+
+  function activateImageFrame(frame) {
+    viewer.mode = 'image';
+    hdus = frame.hdus;
+    populateHduSelect();
+    $('hduSelect').disabled = false;
     currentHdu = hdus[frame.hduIndex] || hdus.find(h => h.isImage);
     currentPlane = frame.plane || 0;
     spectral = WCS.spectral(currentHdu.header.map);
@@ -283,27 +299,24 @@
     const wcs = WCS.build(currentHdu.header.map);
     $('hduSelect').value = currentHdu.index;
 
-    if (frame.state && lockFrames) {
-      viewer.swapImage(image, wcs);                 // keep shared view/scale
-    } else if (frame.state) {
-      viewer.restore(image, wcs, frame.state);
-      applyStateToControls(frame.state);
-    } else {
-      initViewerFromControls();
-      viewer.setImage(image, wcs);
-    }
+    if (frame.state && lockFrames) viewer.swapImage(image, wcs);
+    else if (frame.state) { viewer.restore(image, wcs, frame.state); applyStateToControls(frame.state); }
+    else { initViewerFromControls(); viewer.setImage(image, wcs); }
 
-    overlays.invalidate();
     setupCube(currentHdu);
-    syncLimitInputs();
-    updateStatus();
-    $('canvasWrap').classList.add('has-image');
     $('stFile').textContent = `${frame.name}  —  ${hdus.filter(h => h.isImage).length} image HDU(s)`;
-    document.title = `${frame.name} — DS9 Web Viewer`;
-    renderRegionList();
-    updateFrameBar();
-    viewer.draw();
   }
+
+  function activateRGBFrame(frame) {
+    hdus = []; currentHdu = null; spectral = null;
+    $('hduSelect').disabled = true; $('cubeBar').classList.add('hidden');
+    viewer.scale = $('scaleSelect').value;
+    viewer.setRGB(frame.channels, frame.wcs);
+    if (frame.state) { viewer.zoom = frame.state.zoom; viewer.cx = frame.state.cx; viewer.cy = frame.state.cy; viewer.draw(); }
+    $('stFile').textContent = `${frame.name}  —  RGB (R/G/B channels)`;
+  }
+
+  function activate3DFrame(frame) { /* implemented in the 3D phase */ }
 
   function gotoFrameIndex(i) {
     if (!frames.length) return;
@@ -329,8 +342,28 @@
     }
   }
   function updateFrameBar() {
-    const n = frames.length, i = activeFrame ? frames.indexOf(activeFrame) + 1 : 0;
-    $('frameIndicator').textContent = `${i} / ${n}`;
+    const tabs = $('frameTabs');
+    tabs.innerHTML = '';
+    frames.forEach((f, i) => {
+      const tab = document.createElement('span');
+      tab.className = 'ftab' + (f === activeFrame ? ' active' : '');
+      const badge = f.type === 'rgb' ? 'RGB' : f.type === '3d' ? '3D' : null;
+      tab.innerHTML = (badge ? `<span class="badge">${badge}</span>` : '') +
+        `#${i + 1} ${shortName(f.name)}<span class="fclose" title="削除">×</span>`;
+      tab.addEventListener('click', e => {
+        if (e.target.classList.contains('fclose')) { stopBlink(); exitTile(); removeFrame(f); }
+        else { stopBlink(); exitTile(); gotoFrameIndex(i); }
+      });
+      tabs.appendChild(tab);
+    });
+  }
+  function shortName(n) { return n.length > 16 ? n.slice(0, 14) + '…' : n; }
+  function removeFrame(f) {
+    const i = frames.indexOf(f);
+    if (i < 0) return;
+    if (f === activeFrame) { deleteActiveFrame(); return; }
+    frames.splice(i, 1);
+    updateFrameBar();
   }
 
   // ---- blink ----
@@ -471,6 +504,62 @@
     if (lockFrames) saveActiveFrame();   // current view/scale becomes the shared one
   });
 
+  // ---- RGB frames ----
+  const rgbDraft = { red: null, green: null, blue: null };
+  $('newRgb').addEventListener('click', () => $('rgbModal').classList.remove('hidden'));
+  $('rgbClose').addEventListener('click', () => $('rgbModal').classList.add('hidden'));
+  $('rgbModal').addEventListener('click', e => { if (e.target.id === 'rgbModal') $('rgbModal').classList.add('hidden'); });
+
+  function parseFirstImage(buf) {
+    const hs = FITS.parse(buf);
+    const hdu = hs.find(h => h.isImage);
+    return hdu ? { image: hdu.loadImage(0), wcs: WCS.build(hdu.header.map) } : null;
+  }
+  function setRgbChannel(ch, image, wcs, name) {
+    const [lo, hi] = Scale.limits('zscale', image.data, image.min, image.max);
+    rgbDraft[ch] = { image, wcs, low: lo, high: hi };
+    document.querySelector(`.rgb-name[data-ch="${ch}"]`).textContent = name;
+    document.querySelector(`.rgbLow[data-ch="${ch}"]`).value = Number(lo.toPrecision(6));
+    document.querySelector(`.rgbHigh[data-ch="${ch}"]`).value = Number(hi.toPrecision(6));
+  }
+  document.querySelectorAll('.rgbFile').forEach(inp => {
+    inp.addEventListener('change', e => {
+      const f = e.target.files[0]; if (!f) return;
+      const ch = e.target.dataset.ch;
+      const reader = new FileReader();
+      reader.onload = () => { const r = parseFirstImage(reader.result); r ? setRgbChannel(ch, r.image, r.wcs, f.name) : alert('画像 HDU が見つかりません'); };
+      reader.readAsArrayBuffer(f);
+    });
+  });
+  function makeRgbFrame(channels, wcs, name) {
+    saveActiveFrame();
+    const frame = { type: 'rgb', name, channels, wcs, state: null, regions: [], regionSel: null };
+    frames.push(frame);
+    activateFrame(frame);
+    $('rgbModal').classList.add('hidden');
+  }
+  $('rgbCreate').addEventListener('click', () => {
+    const channels = {}; let ref = null, wcs = null;
+    ['red', 'green', 'blue'].forEach(ch => {
+      const d = rgbDraft[ch]; if (!d) return;
+      const lo = parseFloat(document.querySelector(`.rgbLow[data-ch="${ch}"]`).value);
+      const hi = parseFloat(document.querySelector(`.rgbHigh[data-ch="${ch}"]`).value);
+      channels[ch] = { image: d.image, low: Number.isFinite(lo) ? lo : d.low, high: Number.isFinite(hi) ? hi : d.high };
+      if (!ref) { ref = d.image; wcs = d.wcs; }
+    });
+    if (!ref) { alert('少なくとも1チャンネルにファイルを割り当ててください'); return; }
+    makeRgbFrame(channels, wcs, 'rgb');
+  });
+  // demo: build an RGB from 3 velocity channels of the sample cube
+  async function createDemoRGB() {
+    const buf = await fetch('samples/cube.fits').then(r => r.arrayBuffer());
+    const hdu = FITS.parse(buf).find(h => h.isImage);
+    const wcs = WCS.build(hdu.header.map);
+    const mk = pl => { const im = hdu.loadImage(pl); const [lo, hi] = Scale.limits('99.5', im.data, im.min, im.max); return { image: im, low: lo, high: hi }; };
+    makeRgbFrame({ red: mk(6), green: mk(16), blue: mk(24) }, wcs, 'cube RGB');
+  }
+  $('rgbDemo').addEventListener('click', () => createDemoRGB().catch(() => alert('demo の読み込みに失敗')));
+
   // ---- scale / colormap controls ----
   $('hduSelect').addEventListener('change', e => showHdu(+e.target.value));
 
@@ -526,14 +615,29 @@
     reader.onerror = () => alert('ファイルの読み込みに失敗しました。');
     reader.readAsArrayBuffer(file);
   }
-  $('fileInput').addEventListener('change', e => { if (e.target.files[0]) readFile(e.target.files[0]); });
+  function readFileAsync(file) {
+    return new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result); r.onerror = rej;
+      r.readAsArrayBuffer(file);
+    });
+  }
+  // Open one or many files; each becomes a frame (then "tile" shows them all).
+  async function openFiles(fileList) {
+    const files = Array.from(fileList || []);
+    for (const f of files) {
+      try { loadArrayBuffer(await readFileAsync(f), f.name); } catch (_) {}
+    }
+    if (files.length > 1) enterTile();    // multiple at once → show the tile
+  }
+  $('fileInput').addEventListener('change', e => openFiles(e.target.files));
 
   const wrap = $('canvasWrap');
   ['dragenter', 'dragover'].forEach(ev =>
     wrap.addEventListener(ev, e => { e.preventDefault(); wrap.classList.add('dragover'); }));
   ['dragleave', 'drop'].forEach(ev =>
     wrap.addEventListener(ev, e => { e.preventDefault(); wrap.classList.remove('dragover'); }));
-  wrap.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) readFile(f); });
+  wrap.addEventListener('drop', e => { if (e.dataTransfer.files.length) openFiles(e.dataTransfer.files); });
 
   // wheel over the image steps cube channels (DS9-like cursor navigation)
   $('view').addEventListener('wheel', e => {
@@ -594,6 +698,7 @@
   }
   const q = params.get('file');
   const framesParam = params.get('frames');
+  if (params.get('rgb') === 'demo') createDemoRGB().catch(() => {});
   if (framesParam) {
     (async () => {
       for (const u of framesParam.split(',')) {

@@ -155,6 +155,23 @@ body {
 #frameIndicator { color: var(--fg); font-variant-numeric: tabular-nums; min-width: 42px; text-align: center; }
 #framebar .hint { color: var(--muted); font-size: 11px; }
 
+#frameTabs { display: inline-flex; gap: 3px; flex-wrap: wrap; max-width: 52vw; }
+#frameTabs:empty::before { content: '(no frames)'; color: var(--muted); font-size: 11px; }
+.ftab {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--panel); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 2px 6px; cursor: pointer; font-size: 11px; white-space: nowrap;
+}
+.ftab:hover { background: #41454e; }
+.ftab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ftab .badge {
+  font-size: 9px; font-weight: 700; padding: 0 3px; border-radius: 3px;
+  background: rgba(255,255,255,.18);
+}
+.ftab .fclose { opacity: .6; font-weight: 700; }
+.ftab .fclose:hover { opacity: 1; }
+
 /* ---- region toolbar ---- */
 #regionbar {
   display: flex;
@@ -408,3 +425,15 @@ main {
 .plot-title { color: var(--muted); font-weight: 400; margin-left: 8px; font-size: 12px; }
 #plotCanvas { display: block; width: 100%; background: #15171b; }
 .plot-hint { padding: 6px 12px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--border); }
+
+/* RGB modal */
+.rgb-box { width: min(620px, 94vw); height: auto; }
+.rgb-body { padding: 14px; }
+.rgb-note { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+.rgb-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--muted); }
+.rgb-tag { font-weight: 700; width: 16px; }
+.rgb-name { flex: 1; color: var(--fg); font: 12px ui-monospace, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rgb-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.rgb-actions button { background: var(--panel2); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 5px 12px; cursor: pointer; }
+.rgb-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.rgb-actions button:hover { filter: brightness(1.1); }

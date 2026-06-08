@@ -11,7 +11,7 @@
   <span class="brand">DS9 Web Viewer</span>
   <label class="file-btn">
     Open FITS…
-    <input type="file" id="fileInput" accept=".fits,.fit,.fts,.fz" hidden>
+    <input type="file" id="fileInput" accept=".fits,.fit,.fts,.fz" multiple hidden>
   </label>
 
   <span class="sep"></span>
@@ -86,17 +86,19 @@
 
 <div id="framebar">
   <span class="rb-label">Frame</span>
-  <span id="frameIndicator">0 / 0</span>
+  <div id="frameTabs" title="クリックで切替、× で削除"></div>
   <button id="framePrev" title="Previous frame">◀</button>
   <button id="frameNext" title="Next frame">▶</button>
-  <button id="frameDelete" title="Delete current frame">delete</button>
   <span class="sep"></span>
   <button id="frameSingle" class="active" title="Single frame">single</button>
   <button id="frameTile" title="Tile all frames">tile</button>
   <button id="frameBlink" title="Blink frames">blink</button>
   <span class="sep"></span>
   <label class="chk"><input type="checkbox" id="frameLock"> lock frames</label>
-  <span class="hint">（複数ファイルを開くとフレームが増えます）</span>
+  <span class="sep"></span>
+  <button id="newRgb" title="New RGB frame (load 3 channels)">＋RGB</button>
+  <button id="new3d" title="New 3D frame from a cube">＋3D</button>
+  <button id="frameDelete" title="Delete current frame">delete</button>
 </div>
 
 <div id="regionbar">
@@ -214,6 +216,40 @@
   <span id="stZoom">zoom: –</span>
   <span id="stLimits">low/high: –</span>
 </footer>
+
+<div id="rgbModal" class="modal hidden">
+  <div class="modal-box rgb-box">
+    <div class="modal-head"><span>New RGB Frame</span><button id="rgbClose">×</button></div>
+    <div class="rgb-body">
+      <p class="rgb-note">各チャンネルに FITS を割り当てます（同じ画像サイズが必要）。low/high は読み込み時に zscale で自動設定、編集可。</p>
+      <div class="rgb-row" data-ch="red">
+        <span class="rgb-tag" style="color:#ff6b6b">R</span>
+        <label class="file-btn small">file<input type="file" class="rgbFile" data-ch="red" accept=".fits,.fit,.fts" hidden></label>
+        <span class="rgb-name" data-ch="red">—</span>
+        low <input type="number" step="any" class="num rgbLow" data-ch="red">
+        high <input type="number" step="any" class="num rgbHigh" data-ch="red">
+      </div>
+      <div class="rgb-row" data-ch="green">
+        <span class="rgb-tag" style="color:#51cf66">G</span>
+        <label class="file-btn small">file<input type="file" class="rgbFile" data-ch="green" accept=".fits,.fit,.fts" hidden></label>
+        <span class="rgb-name" data-ch="green">—</span>
+        low <input type="number" step="any" class="num rgbLow" data-ch="green">
+        high <input type="number" step="any" class="num rgbHigh" data-ch="green">
+      </div>
+      <div class="rgb-row" data-ch="blue">
+        <span class="rgb-tag" style="color:#4c8dff">B</span>
+        <label class="file-btn small">file<input type="file" class="rgbFile" data-ch="blue" accept=".fits,.fit,.fts" hidden></label>
+        <span class="rgb-name" data-ch="blue">—</span>
+        low <input type="number" step="any" class="num rgbLow" data-ch="blue">
+        high <input type="number" step="any" class="num rgbHigh" data-ch="blue">
+      </div>
+      <div class="rgb-actions">
+        <button id="rgbDemo" title="同梱サンプルでRGB作成">demo (cube ch)</button>
+        <button id="rgbCreate" class="primary">create frame</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div id="plotModal" class="modal hidden">
   <div class="modal-box plot-box">
