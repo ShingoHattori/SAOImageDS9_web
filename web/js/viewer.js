@@ -13,6 +13,37 @@
 (function (global) {
   'use strict';
 
+  // Colormap an image into a canvas at native resolution (row 0 at the top,
+  // i.e. image y flipped). Shared by the single view and the tile renderer.
+  global.renderColormap = function (canvas, image, p) {
+    const { data, width, height } = image;
+    canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    const lut = global.Colormap.build(p.cmap, p.invert);
+    const transfer = global.Scale.makeTransfer(p.scale, image, p.low, p.high);
+    const lo = p.low, span = (p.high - p.low) || 1;
+    const contrast = p.contrast, bias = p.bias;
+    const img = ctx.createImageData(width, height);
+    const px = img.data;
+    for (let r = 0; r < height; r++) {
+      const srcRow = r * width;
+      const dstRow = (height - 1 - r) * width;   // vertical flip
+      for (let c = 0; c < width; c++) {
+        const v = data[srcRow + c];
+        const o = (dstRow + c) * 4;
+        if (!Number.isFinite(v)) { px[o+3] = 0; continue; }
+        let u = (v - lo) / span;
+        u = u < 0 ? 0 : u > 1 ? 1 : u;
+        u = transfer(u);
+        let t = (u - bias) * contrast + 0.5;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const idx = (t * 255 + 0.5) | 0;
+        px[o] = lut[idx*3]; px[o+1] = lut[idx*3+1]; px[o+2] = lut[idx*3+2]; px[o+3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  };
+
   class Viewer {
     constructor(canvas) {
       this.canvas = canvas;
@@ -42,6 +73,10 @@
       this.onChange = null;       // callback() after view/colormap changes (panels)
       this.overlay = null;        // function(ctx) painted on top of the image
       this.pointerHook = null;    // {down,move,up} — consumes events before pan
+      this.tileMode = false;      // grid display of all frames
+      this.tiles = [];            // [{canvas,label,active}] for tile mode
+      this.onTileClick = null;    // callback(index) when a tile is clicked
+      this._tileLayout = null;
       this._raf = null;
 
       this._bindInteraction();
@@ -110,36 +145,9 @@
     // Render full-resolution colormapped image to the offscreen canvas.
     renderImage() {
       if (!this.image) return;
-      const { data, width, height } = this.image;
-      const lut = global.Colormap.build(this.cmap, this.invert);
-      const transfer = global.Scale.makeTransfer(this.scale, this.image, this.low, this.high);
-      const lo = this.low, span = (this.high - this.low) || 1;
-      const contrast = this.contrast, bias = this.bias;
-
-      const img = this.offCtx.createImageData(width, height);
-      const px = img.data;
-      // background (NaN) colour: transparent so checker shows through
-      for (let r = 0; r < height; r++) {
-        const srcRow = r * width;
-        const dstRow = (height - 1 - r) * width; // vertical flip
-        for (let c = 0; c < width; c++) {
-          const v = data[srcRow + c];
-          const o = (dstRow + c) * 4;
-          if (!Number.isFinite(v)) { px[o+3] = 0; continue; }
-          let u = (v - lo) / span;
-          u = u < 0 ? 0 : u > 1 ? 1 : u;
-          u = transfer(u);
-          // apply contrast/bias on the colormap index
-          let t = (u - bias) * contrast + 0.5;
-          t = t < 0 ? 0 : t > 1 ? 1 : t;
-          const idx = (t * 255 + 0.5) | 0;
-          px[o]   = lut[idx*3];
-          px[o+1] = lut[idx*3+1];
-          px[o+2] = lut[idx*3+2];
-          px[o+3] = 255;
-        }
-      }
-      this.offCtx.putImageData(img, 0, 0);
+      global.renderColormap(this.off, this.image, {
+        scale: this.scale, low: this.low, high: this.high,
+        cmap: this.cmap, invert: this.invert, contrast: this.contrast, bias: this.bias });
     }
 
     // ----- view transform -----
@@ -191,6 +199,8 @@
       const ctx = this.ctx;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, cw, ch);
+
+      if (this.tileMode) { this._drawTiles(ctx, cw, ch); if (this.onChange) this.onChange(); return; }
       if (!this.image) return;
 
       ctx.imageSmoothingEnabled = false;
@@ -205,6 +215,31 @@
       if (this.onChange) this.onChange();
     }
 
+    _drawTiles(ctx, cw, ch) {
+      const n = this.tiles.length;
+      if (!n) return;
+      const cols = Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols);
+      const cwid = cw / cols, chgt = ch / rows;
+      this._tileLayout = { cols, rows, cwid, chgt };
+      ctx.imageSmoothingEnabled = false;
+      ctx.textBaseline = 'top';
+      for (let i = 0; i < n; i++) {
+        const t = this.tiles[i];
+        const ox = (i % cols) * cwid, oy = Math.floor(i / cols) * chgt;
+        const pad = 4, aw = cwid - 2*pad, ah = chgt - 2*pad;
+        const s = Math.min(aw / t.canvas.width, ah / t.canvas.height);
+        const w = t.canvas.width * s, h = t.canvas.height * s;
+        ctx.drawImage(t.canvas, 0, 0, t.canvas.width, t.canvas.height,
+          ox + (cwid - w)/2, oy + (chgt - h)/2, w, h);
+        ctx.strokeStyle = t.active ? '#4c8dff' : '#3a3e47';
+        ctx.lineWidth = t.active ? 2 : 1;
+        ctx.strokeRect(ox + 1, oy + 1, cwid - 2, chgt - 2);
+        ctx.fillStyle = t.active ? '#4c8dff' : '#9aa0aa';
+        ctx.font = '12px sans-serif';
+        ctx.fillText(t.label, ox + 6, oy + 5);
+      }
+    }
+
     // ----- interaction -----
     _bindInteraction() {
       const c = this.canvas;
@@ -216,6 +251,14 @@
         const rect = c.getBoundingClientRect();
         const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
         last = { x: e.clientX, y: e.clientY };
+        if (this.tileMode) {
+          const L = this._tileLayout;
+          if (L && this.onTileClick) {
+            const idx = Math.floor(sy / L.chgt) * L.cols + Math.floor(sx / L.cwid);
+            if (idx >= 0 && idx < this.tiles.length) this.onTileClick(idx);
+          }
+          e.preventDefault(); return;
+        }
         if (hook() && hook().down && hook().down(sx, sy, e)) {
           dragging = 'hook'; e.preventDefault(); return;
         }

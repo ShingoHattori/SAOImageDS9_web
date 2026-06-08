@@ -271,6 +271,7 @@
   // ---- blink ----
   function startBlink() {
     if (frames.length < 2) return;
+    exitTile();
     $('frameBlink').classList.add('active');
     $('frameSingle').classList.remove('active');
     blinkTimer = setInterval(() => {
@@ -280,8 +281,40 @@
   function stopBlink() {
     if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null; }
     $('frameBlink').classList.remove('active');
-    $('frameSingle').classList.add('active');
+    if (!viewer.tileMode) $('frameSingle').classList.add('active');
   }
+
+  // ---- tile: render every frame into a grid ----
+  function enterTile() {
+    if (!frames.length) return;
+    stopBlink();
+    saveActiveFrame();
+    viewer.tiles = frames.map((f, i) => {
+      const hdu = f.hdus[f.hduIndex] || f.hdus.find(h => h.isImage);
+      const img = hdu.loadImage(f.plane || 0);
+      const st = f.state || snapshotState();
+      const canvas = document.createElement('canvas');
+      window.renderColormap(canvas, img, st);
+      return { canvas, label: `#${i + 1} ${f.name}`, active: f === activeFrame };
+    });
+    viewer.tileMode = true;
+    $('frameTile').classList.add('active');
+    $('frameSingle').classList.remove('active');
+    viewer.draw();
+  }
+  function exitTile() {
+    if (!viewer.tileMode) return;
+    viewer.tileMode = false;
+    viewer.tiles = [];
+    $('frameTile').classList.remove('active');
+    $('frameSingle').classList.add('active');
+    viewer.draw();
+  }
+  viewer.onTileClick = (idx) => {
+    const f = frames[idx];
+    exitTile();
+    if (f && f !== activeFrame) gotoFrameIndex(idx);
+  };
 
   // HDU change within the active frame (fresh display using current controls)
   function showHdu(index) {
@@ -360,10 +393,11 @@
   $('cubeSlider').addEventListener('input', e => { stopPlay(); setPlane(+e.target.value); });
 
   // ---- frame controls ----
-  $('framePrev').addEventListener('click', () => { stopBlink(); gotoFrameIndex(frames.indexOf(activeFrame) - 1); });
-  $('frameNext').addEventListener('click', () => { stopBlink(); gotoFrameIndex(frames.indexOf(activeFrame) + 1); });
-  $('frameDelete').addEventListener('click', () => { stopBlink(); deleteActiveFrame(); });
-  $('frameSingle').addEventListener('click', stopBlink);
+  $('framePrev').addEventListener('click', () => { stopBlink(); exitTile(); gotoFrameIndex(frames.indexOf(activeFrame) - 1); });
+  $('frameNext').addEventListener('click', () => { stopBlink(); exitTile(); gotoFrameIndex(frames.indexOf(activeFrame) + 1); });
+  $('frameDelete').addEventListener('click', () => { stopBlink(); exitTile(); deleteActiveFrame(); });
+  $('frameSingle').addEventListener('click', () => { stopBlink(); exitTile(); });
+  $('frameTile').addEventListener('click', () => { viewer.tileMode ? exitTile() : enterTile(); });
   $('frameBlink').addEventListener('click', () => { blinkTimer ? stopBlink() : startBlink(); });
   $('frameLock').addEventListener('change', e => {
     lockFrames = e.target.checked;
@@ -471,6 +505,7 @@
       if (params.get('lock')) { $('frameLock').checked = true; lockFrames = true; saveActiveFrame(); }
       const fi = parseInt(params.get('frame'), 10);
       if (Number.isFinite(fi)) gotoFrameIndex(fi);
+      if (params.get('tile')) enterTile();
     })();
   } else if (q) {
     fetch(q).then(r => r.arrayBuffer())
