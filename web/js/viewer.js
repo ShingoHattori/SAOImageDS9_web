@@ -61,6 +61,33 @@
       this.draw();
     }
 
+    // Restore a saved frame state (view + scale) onto a (new) image, without
+    // the zoomFit / limit recompute that setImage does.
+    restore(image, wcs, st) {
+      this.image = image;
+      this.wcs = wcs || null;
+      this.off.width = image.width;
+      this.off.height = image.height;
+      this.scale = st.scale; this.limitMode = st.limitMode;
+      this.cmap = st.cmap; this.invert = st.invert;
+      this.low = st.low; this.high = st.high;
+      this.contrast = st.contrast; this.bias = st.bias;
+      this.lockScale = st.lockScale;
+      this.zoom = st.zoom; this.cx = st.cx; this.cy = st.cy;
+      this.renderImage();
+      this.draw();
+    }
+
+    // Swap the image keeping the current view + scale (for cross-frame lock).
+    swapImage(image, wcs) {
+      this.image = image;
+      this.wcs = wcs || null;
+      this.off.width = image.width;
+      this.off.height = image.height;
+      this.renderImage();
+      this.draw();
+    }
+
     // Swap to another cube slice without resetting the view; limits stay fixed
     // when lockScale is on (so a spectral line appears/disappears naturally).
     setPlane(image) {

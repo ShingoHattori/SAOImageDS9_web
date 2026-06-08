@@ -83,6 +83,20 @@
   <button id="headerBtn" title="Show FITS header" disabled>header</button>
 </header>
 
+<div id="framebar">
+  <span class="rb-label">Frame</span>
+  <span id="frameIndicator">0 / 0</span>
+  <button id="framePrev" title="Previous frame">◀</button>
+  <button id="frameNext" title="Next frame">▶</button>
+  <button id="frameDelete" title="Delete current frame">delete</button>
+  <span class="sep"></span>
+  <button id="frameSingle" class="active" title="Single frame">single</button>
+  <button id="frameBlink" title="Blink frames">blink</button>
+  <span class="sep"></span>
+  <label class="chk"><input type="checkbox" id="frameLock"> lock frames</label>
+  <span class="hint">（複数ファイルを開くとフレームが増えます）</span>
+</div>
+
 <div id="regionbar">
   <span class="rb-label">Regions</span>
   <div class="rb-tools" role="group">

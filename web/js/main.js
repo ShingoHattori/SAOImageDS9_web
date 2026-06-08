@@ -136,15 +136,44 @@
     $('highInput').value = Number(viewer.high.toPrecision(6));
   }
 
-  // ---- file loading ----
-  function loadArrayBuffer(buf, name) {
-    let parsed;
-    try { parsed = FITS.parse(buf); }
-    catch (err) { alert('FITS の解析に失敗しました: ' + err.message); return; }
-    hdus = parsed;
-    const imageHdus = hdus.filter(h => h.isImage);
-    if (!imageHdus.length) { alert('表示可能な画像 HDU が見つかりませんでした。'); return; }
+  // ---- frames ----
+  // Each loaded file is a DS9-style "frame" holding its own HDUs, view, scale
+  // and regions. Switching frames saves the active state and restores the next.
+  let frames = [];
+  let activeFrame = null;
+  let lockFrames = false;     // share scale/colormap/pan-zoom across frames
+  let blinkTimer = null;
 
+  function snapshotState() {
+    return { zoom: viewer.zoom, cx: viewer.cx, cy: viewer.cy,
+      scale: viewer.scale, limitMode: viewer.limitMode, cmap: viewer.cmap,
+      invert: viewer.invert, low: viewer.low, high: viewer.high,
+      contrast: viewer.contrast, bias: viewer.bias, lockScale: viewer.lockScale };
+  }
+  function saveActiveFrame() {
+    if (!activeFrame) return;
+    if (currentHdu) activeFrame.hduIndex = currentHdu.index;
+    activeFrame.plane = currentPlane;
+    activeFrame.state = snapshotState();
+    activeFrame.regions = regions.list;
+    activeFrame.regionSel = regions.selected;
+  }
+  function applyStateToControls(st) {
+    $('scaleSelect').value = st.scale;
+    $('limitSelect').value = st.limitMode;
+    $('cmapSelect').value = st.cmap;
+    $('invertChk').checked = st.invert;
+    $('lockChk').checked = st.lockScale;
+  }
+  function initViewerFromControls() {
+    viewer.scale = $('scaleSelect').value;
+    viewer.limitMode = $('limitSelect').value === 'user' ? 'zscale' : $('limitSelect').value;
+    if ($('limitSelect').value === 'user') $('limitSelect').value = 'zscale';
+    viewer.cmap = $('cmapSelect').value;
+    viewer.invert = $('invertChk').checked;
+    viewer.lockScale = $('lockChk').checked;
+  }
+  function populateHduSelect() {
     const sel = $('hduSelect');
     sel.innerHTML = '';
     hdus.forEach(h => {
@@ -157,35 +186,118 @@
       sel.appendChild(opt);
     });
     sel.disabled = false;
-    $('headerBtn').disabled = false;
-
-    sel.value = imageHdus[0].index;
-    showHdu(imageHdus[0].index);
-
-    $('stFile').textContent = name + `  —  ${imageHdus.length} image HDU(s)`;
-    $('canvasWrap').classList.add('has-image');
-    document.title = `${name} — DS9 Web Viewer`;
   }
 
+  // ---- file loading: each file becomes a new frame ----
+  function loadArrayBuffer(buf, name) {
+    let parsed;
+    try { parsed = FITS.parse(buf); }
+    catch (err) { alert('FITS の解析に失敗しました: ' + err.message); return; }
+    const imageHdus = parsed.filter(h => h.isImage);
+    if (!imageHdus.length) { alert('表示可能な画像 HDU が見つかりませんでした。'); return; }
+    saveActiveFrame();
+    const frame = { name, hdus: parsed, hduIndex: imageHdus[0].index,
+      plane: 0, state: null, regions: [], regionSel: null };
+    frames.push(frame);
+    activateFrame(frame);
+  }
+
+  function activateFrame(frame) {
+    stopPlay();
+    activeFrame = frame;
+    hdus = frame.hdus;
+    populateHduSelect();
+    $('headerBtn').disabled = false;
+
+    regions.list = frame.regions;
+    regions.selected = frame.regionSel || null;
+
+    currentHdu = hdus[frame.hduIndex] || hdus.find(h => h.isImage);
+    currentPlane = frame.plane || 0;
+    spectral = WCS.spectral(currentHdu.header.map);
+    const image = currentHdu.loadImage(currentPlane);
+    const wcs = WCS.build(currentHdu.header.map);
+    $('hduSelect').value = currentHdu.index;
+
+    if (frame.state && lockFrames) {
+      viewer.swapImage(image, wcs);                 // keep shared view/scale
+    } else if (frame.state) {
+      viewer.restore(image, wcs, frame.state);
+      applyStateToControls(frame.state);
+    } else {
+      initViewerFromControls();
+      viewer.setImage(image, wcs);
+    }
+
+    setupCube(currentHdu);
+    syncLimitInputs();
+    updateStatus();
+    $('canvasWrap').classList.add('has-image');
+    $('stFile').textContent = `${frame.name}  —  ${hdus.filter(h => h.isImage).length} image HDU(s)`;
+    document.title = `${frame.name} — DS9 Web Viewer`;
+    renderRegionList();
+    updateFrameBar();
+    viewer.draw();
+  }
+
+  function gotoFrameIndex(i) {
+    if (!frames.length) return;
+    i = (i % frames.length + frames.length) % frames.length;
+    const target = frames[i];
+    if (target === activeFrame) return;
+    saveActiveFrame();
+    activateFrame(target);
+  }
+  function deleteActiveFrame() {
+    if (!activeFrame) return;
+    const i = frames.indexOf(activeFrame);
+    frames.splice(i, 1);
+    activeFrame = null;
+    if (frames.length) activateFrame(frames[Math.min(i, frames.length - 1)]);
+    else {
+      regions.clear();
+      viewer.image = null; viewer.draw();
+      $('canvasWrap').classList.remove('has-image');
+      $('stFile').textContent = 'no file';
+      $('cubeBar').classList.add('hidden');
+      updateFrameBar();
+    }
+  }
+  function updateFrameBar() {
+    const n = frames.length, i = activeFrame ? frames.indexOf(activeFrame) + 1 : 0;
+    $('frameIndicator').textContent = `${i} / ${n}`;
+  }
+
+  // ---- blink ----
+  function startBlink() {
+    if (frames.length < 2) return;
+    $('frameBlink').classList.add('active');
+    $('frameSingle').classList.remove('active');
+    blinkTimer = setInterval(() => {
+      gotoFrameIndex(frames.indexOf(activeFrame) + 1);
+    }, 600);
+  }
+  function stopBlink() {
+    if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null; }
+    $('frameBlink').classList.remove('active');
+    $('frameSingle').classList.add('active');
+  }
+
+  // HDU change within the active frame (fresh display using current controls)
   function showHdu(index) {
     stopPlay();
     const hdu = hdus[index];
     if (!hdu || !hdu.isImage) return;
     currentHdu = hdu;
+    if (activeFrame) activeFrame.hduIndex = index;
     spectral = WCS.spectral(hdu.header.map);
-    // start a cube near the middle so a spectral line is likely in view
     currentPlane = hdu.depth > 1 ? Math.floor(hdu.depth / 2) : 0;
 
     const image = hdu.loadImage(currentPlane);
     if (!image) { alert('画像データの読み込みに失敗しました。'); return; }
     const wcs = WCS.build(hdu.header.map);
 
-    viewer.scale = $('scaleSelect').value;
-    viewer.limitMode = $('limitSelect').value === 'user' ? 'zscale' : $('limitSelect').value;
-    if ($('limitSelect').value === 'user') $('limitSelect').value = 'zscale';
-    viewer.cmap = $('cmapSelect').value;
-    viewer.invert = $('invertChk').checked;
-    viewer.lockScale = $('lockChk').checked;
+    initViewerFromControls();
     viewer.setImage(image, wcs);
 
     setupCube(hdu);
@@ -246,6 +358,17 @@
   $('cubeLast').addEventListener('click', () => { stopPlay(); setPlane(currentHdu.depth - 1); });
   $('cubePlay').addEventListener('click', togglePlay);
   $('cubeSlider').addEventListener('input', e => { stopPlay(); setPlane(+e.target.value); });
+
+  // ---- frame controls ----
+  $('framePrev').addEventListener('click', () => { stopBlink(); gotoFrameIndex(frames.indexOf(activeFrame) - 1); });
+  $('frameNext').addEventListener('click', () => { stopBlink(); gotoFrameIndex(frames.indexOf(activeFrame) + 1); });
+  $('frameDelete').addEventListener('click', () => { stopBlink(); deleteActiveFrame(); });
+  $('frameSingle').addEventListener('click', stopBlink);
+  $('frameBlink').addEventListener('click', () => { blinkTimer ? stopBlink() : startBlink(); });
+  $('frameLock').addEventListener('change', e => {
+    lockFrames = e.target.checked;
+    if (lockFrames) saveActiveFrame();   // current view/scale becomes the shared one
+  });
 
   // ---- scale / colormap controls ----
   $('hduSelect').addEventListener('change', e => showHdu(+e.target.value));
@@ -338,7 +461,18 @@
   // ---- ?file=…&ch=… query for quick demos ----
   const params = new URLSearchParams(location.search);
   const q = params.get('file');
-  if (q) {
+  const framesParam = params.get('frames');
+  if (framesParam) {
+    (async () => {
+      for (const u of framesParam.split(',')) {
+        try { const buf = await fetch(u).then(r => r.arrayBuffer()); loadArrayBuffer(buf, u.split('/').pop()); }
+        catch (_) {}
+      }
+      if (params.get('lock')) { $('frameLock').checked = true; lockFrames = true; saveActiveFrame(); }
+      const fi = parseInt(params.get('frame'), 10);
+      if (Number.isFinite(fi)) gotoFrameIndex(fi);
+    })();
+  } else if (q) {
     fetch(q).then(r => r.arrayBuffer())
       .then(buf => {
         loadArrayBuffer(buf, q.split('/').pop());

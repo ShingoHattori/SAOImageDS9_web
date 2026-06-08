@@ -130,6 +130,31 @@ body {
 #cubeLabel { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 #cubeBar .vel { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* ---- frame toolbar ---- */
+#framebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 5px 10px;
+  background: var(--panel2);
+  border-bottom: 1px solid var(--border);
+}
+#framebar .rb-label {
+  font-weight: 600; color: var(--muted);
+  text-transform: uppercase; font-size: 11px; letter-spacing: .5px;
+}
+#framebar button {
+  background: var(--panel); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 3px 9px; cursor: pointer;
+}
+#framebar button:hover { background: #41454e; }
+#framebar button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+#framebar label { color: var(--fg); display: inline-flex; align-items: center; gap: 4px; }
+#frameIndicator { color: var(--fg); font-variant-numeric: tabular-nums; min-width: 42px; text-align: center; }
+#framebar .hint { color: var(--muted); font-size: 11px; }
+
 /* ---- region toolbar ---- */
 #regionbar {
   display: flex;
