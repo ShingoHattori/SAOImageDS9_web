@@ -51,6 +51,29 @@
     viewer.draw();
   });
 
+  // ---- image processing: smoothing / binning ----
+  function reprocessImage(refit) {
+    viewer.reprocess();
+    if (refit) viewer.zoomFit();
+    overlays.invalidate();
+    syncLimitInputs();
+    updateStatus();
+    viewer.draw();
+  }
+  $('smoothChk').addEventListener('change', e => { viewer.smooth.on = e.target.checked; reprocessImage(false); });
+  $('smoothType').addEventListener('change', e => { viewer.smooth.type = e.target.value; if (viewer.smooth.on) reprocessImage(false); });
+  $('smoothRadius').addEventListener('change', e => {
+    viewer.smooth.radius = Math.max(0.5, +e.target.value || 2);
+    if (viewer.smooth.on) reprocessImage(false);
+  });
+  $('binSelect').addEventListener('change', e => { viewer.binFactor = +e.target.value || 1; reprocessImage(true); });
+
+  // ---- orientation (flip / rotate) ----
+  $('flipX').addEventListener('click', () => viewer.flip('x'));
+  $('flipY').addEventListener('click', () => viewer.flip('y'));
+  $('rotate90').addEventListener('click', () => viewer.rotate90(1));
+  $('orientReset').addEventListener('click', () => viewer.resetOrient());
+
   document.querySelectorAll('#regionbar .rb-tools button').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#regionbar .rb-tools button').forEach(b => b.classList.remove('active'));
@@ -539,6 +562,23 @@
     }
     viewer.draw();
   }
+  function applyImageParam() {
+    const s = params.get('smooth'), b = params.get('bin');
+    if (s) { $('smoothChk').checked = true; viewer.smooth.on = true; viewer.smooth.radius = +s || 2; $('smoothRadius').value = viewer.smooth.radius; }
+    if (b) { $('binSelect').value = b; viewer.binFactor = +b || 1; }
+    if (s || b) { viewer.reprocess(); viewer.zoomFit(); overlays.invalidate(); syncLimitInputs(); updateStatus(); viewer.draw(); }
+    const o = params.get('orient');
+    if (o) {
+      o.split(',').forEach(t => {
+        if (t === 'flipx') viewer.orient.flipX = true;
+        else if (t === 'flipy') viewer.orient.flipY = true;
+        else if (t === 'rot90') viewer.orient.rot = 90;
+        else if (t === 'rot180') viewer.orient.rot = 180;
+        else if (t === 'rot270') viewer.orient.rot = 270;
+      });
+      viewer.zoomFit(); viewer.draw();
+    }
+  }
   const q = params.get('file');
   const framesParam = params.get('frames');
   if (framesParam) {
@@ -578,6 +618,7 @@
           const sidx = parseInt(params.get('select'), 10);
           if (Number.isFinite(sidx) && regions.list[sidx]) regions.select(regions.list[sidx]);
         }
+        applyImageParam();
         applyOverlayParam();
       })
       .catch(() => {});

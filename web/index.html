@@ -131,6 +131,26 @@
   <input type="number" id="ovLevels" class="num" value="5" min="1" max="20" title="contour levels" style="width:48px">
   <label class="chk"><input type="checkbox" id="ovGrid"> grid</label>
   <label class="chk"><input type="checkbox" id="ovCross"> crosshair</label>
+  <span class="sep"></span>
+  <span class="rb-label">Image</span>
+  <label class="chk"><input type="checkbox" id="smoothChk"> smooth</label>
+  <select id="smoothType">
+    <option value="gaussian">gaussian</option>
+    <option value="boxcar">boxcar</option>
+  </select>
+  <input type="number" id="smoothRadius" class="num" value="2" min="0.5" step="0.5" style="width:48px" title="smooth radius">
+  <label>bin
+    <select id="binSelect">
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="4">4</option>
+      <option value="8">8</option>
+    </select>
+  </label>
+  <button id="flipX" title="Flip horizontally">flip X</button>
+  <button id="flipY" title="Flip vertically">flip Y</button>
+  <button id="rotate90" title="Rotate 90°">rot 90</button>
+  <button id="orientReset" title="Reset orientation">⟲</button>
 </div>
 
 <div id="workspace">
@@ -208,6 +228,7 @@
 <script src="js/colormap.js"></script>
 <script src="js/scale.js"></script>
 <script src="js/wcs.js"></script>
+<script src="js/smoothing.js"></script>
 <script src="js/viewer.js"></script>
 <script src="js/panels.js"></script>
 <script src="js/regions.js"></script>

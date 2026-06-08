@@ -51,8 +51,12 @@
       this.off = document.createElement('canvas');
       this.offCtx = this.off.getContext('2d');
 
-      this.image = null;          // { data, width, height, min, max }
+      this.raw = null;            // raw image as read from FITS
+      this.image = null;          // displayed image (raw, or smoothed/binned)
       this.wcs = null;            // pixToSky function or null
+      this.smooth = { on: false, type: 'gaussian', radius: 2 };
+      this.binFactor = 1;
+      this.orient = { rot: 0, flipX: false, flipY: false };   // rot: 0/90/180/270 CCW
 
       this.scale = 'linear';
       this.limitMode = 'zscale';
@@ -83,11 +87,35 @@
       this._resizeObserver();
     }
 
+    // Apply binning then smoothing to the raw image (image-domain processing).
+    _process(img) {
+      let out = img;
+      if (this.binFactor > 1) out = global.Smooth.bin(out, this.binFactor);
+      if (this.smooth.on) out = this.smooth.type === 'boxcar'
+        ? global.Smooth.boxcar(out, this.smooth.radius)
+        : global.Smooth.gaussian(out, this.smooth.radius);
+      return out;
+    }
+    _applySource(rawImg) {
+      this.raw = rawImg;
+      this.image = this._process(rawImg);
+      this.off.width = this.image.width;
+      this.off.height = this.image.height;
+    }
+    // Rebuild the displayed image after smooth/bin settings change.
+    reprocess() {
+      if (!this.raw) return;
+      this.image = this._process(this.raw);
+      this.off.width = this.image.width;
+      this.off.height = this.image.height;
+      if (this.limitMode !== 'user') this.recomputeLimits();
+      this.renderImage();
+      this.draw();
+    }
+
     setImage(image, wcs) {
-      this.image = image;
       this.wcs = wcs || null;
-      this.off.width = image.width;
-      this.off.height = image.height;
+      this._applySource(image);
       this.contrast = 1;
       this.bias = 0.5;
       this.recomputeLimits();
@@ -99,15 +127,13 @@
     // Restore a saved frame state (view + scale) onto a (new) image, without
     // the zoomFit / limit recompute that setImage does.
     restore(image, wcs, st) {
-      this.image = image;
       this.wcs = wcs || null;
-      this.off.width = image.width;
-      this.off.height = image.height;
       this.scale = st.scale; this.limitMode = st.limitMode;
       this.cmap = st.cmap; this.invert = st.invert;
       this.low = st.low; this.high = st.high;
       this.contrast = st.contrast; this.bias = st.bias;
       this.lockScale = st.lockScale;
+      this._applySource(image);
       this.zoom = st.zoom; this.cx = st.cx; this.cy = st.cy;
       this.renderImage();
       this.draw();
@@ -115,10 +141,8 @@
 
     // Swap the image keeping the current view + scale (for cross-frame lock).
     swapImage(image, wcs) {
-      this.image = image;
       this.wcs = wcs || null;
-      this.off.width = image.width;
-      this.off.height = image.height;
+      this._applySource(image);
       this.renderImage();
       this.draw();
     }
@@ -126,9 +150,7 @@
     // Swap to another cube slice without resetting the view; limits stay fixed
     // when lockScale is on (so a spectral line appears/disappears naturally).
     setPlane(image) {
-      this.image = image;
-      this.off.width = image.width;
-      this.off.height = image.height;
+      this._applySource(image);
       if (!this.lockScale) this.recomputeLimits();
       this.renderImage();
       this.draw();
@@ -154,10 +176,11 @@
     zoomFit() {
       if (!this.image) return;
       const { clientWidth: cw, clientHeight: ch } = this.canvas;
-      const z = Math.min(cw / this.image.width, ch / this.image.height);
+      const { W, H } = this.viewDims();
+      const z = Math.min(cw / W, ch / H);
       this.zoom = z > 0 ? z : 1;
-      this.cx = this.image.width / 2;
-      this.cy = this.image.height / 2;
+      this.cx = W / 2;
+      this.cy = H / 2;
     }
 
     setZoom(factor, anchorScreen) {
@@ -174,20 +197,61 @@
 
     zoomTo(z) { if (this.image) { this.zoom = z; this.draw(); } }
 
+    // Oriented "view" dimensions (swap for 90/270 rotation).
+    viewDims() {
+      const w = this.image ? this.image.width : 1, h = this.image ? this.image.height : 1;
+      return (this.orient.rot === 90 || this.orient.rot === 270) ? { W: h, H: w } : { W: w, H: h };
+    }
+    // image coords (ix,iy, y up) -> oriented view coords (vx,vy, y up).
+    _orient(ix, iy) {
+      const w = this.image.width, h = this.image.height;
+      let u = ix - w / 2, v = iy - h / 2;
+      if (this.orient.flipX) u = -u;
+      if (this.orient.flipY) v = -v;
+      let u2, v2;
+      switch (this.orient.rot) {
+        case 90:  u2 = -v; v2 = u; break;
+        case 180: u2 = -u; v2 = -v; break;
+        case 270: u2 = v; v2 = -u; break;
+        default:  u2 = u; v2 = v;
+      }
+      const { W, H } = this.viewDims();
+      return { vx: u2 + W / 2, vy: v2 + H / 2 };
+    }
+    _unorient(vx, vy) {
+      const w = this.image.width, h = this.image.height;
+      const { W, H } = this.viewDims();
+      let u2 = vx - W / 2, v2 = vy - H / 2, u, v;
+      switch (this.orient.rot) {
+        case 90:  u = v2; v = -u2; break;
+        case 180: u = -u2; v = -v2; break;
+        case 270: u = -v2; v = u2; break;
+        default:  u = u2; v = v2;
+      }
+      if (this.orient.flipX) u = -u;
+      if (this.orient.flipY) v = -v;
+      return { ix: u + w / 2, iy: v + h / 2 };
+    }
+
     // screen(css px) -> image pixel (0-based, y up). Returns floats.
     screenToImage(sx, sy) {
       const cw = this.canvas.clientWidth, ch = this.canvas.clientHeight;
-      const dx = (sx - cw / 2) / this.zoom;
-      const dy = (sy - ch / 2) / this.zoom;
-      return { ix: this.cx + dx, iy: this.cy - dy };
+      const vx = this.cx + (sx - cw / 2) / this.zoom;
+      const vy = this.cy - (sy - ch / 2) / this.zoom;
+      return this._unorient(vx, vy);
     }
 
     // image pixel (0-based, y up) -> screen(css px). Inverse of screenToImage.
     imageToScreen(ix, iy) {
       const cw = this.canvas.clientWidth, ch = this.canvas.clientHeight;
-      return { sx: (ix - this.cx) * this.zoom + cw / 2,
-               sy: ch / 2 + (this.cy - iy) * this.zoom };
+      const { vx, vy } = this._orient(ix, iy);
+      return { sx: (vx - this.cx) * this.zoom + cw / 2,
+               sy: ch / 2 + (this.cy - vy) * this.zoom };
     }
+
+    rotate90(dir) { this.orient.rot = (this.orient.rot + (dir < 0 ? 270 : 90)) % 360; this.zoomFit(); this.draw(); }
+    flip(axis) { if (axis === 'x') this.orient.flipX = !this.orient.flipX; else this.orient.flipY = !this.orient.flipY; this.zoomFit(); this.draw(); }
+    resetOrient() { this.orient = { rot: 0, flipX: false, flipY: false }; this.zoomFit(); this.draw(); }
 
     draw() {
       const dpr = window.devicePixelRatio || 1;
@@ -204,12 +268,16 @@
       if (!this.image) return;
 
       ctx.imageSmoothingEnabled = false;
-      const z = this.zoom;
       const w = this.image.width, h = this.image.height;
-      // canvas-space top-left of the image
-      const left = cw / 2 - this.cx * z;
-      const top = ch / 2 - (h - this.cy) * z;
-      ctx.drawImage(this.off, 0, 0, w, h, left, top, w * z, h * z);
+      // Map the offscreen image (pixel (0,0)→image(0,h) … i.e. row 0 at top)
+      // through the oriented image→screen transform via a corner-based affine,
+      // so rotation/flip apply consistently with regions/overlays.
+      const P00 = this.imageToScreen(0, h), P10 = this.imageToScreen(w, h), P01 = this.imageToScreen(0, 0);
+      const ax = (P10.sx - P00.sx) / w, ay = (P10.sy - P00.sy) / w;
+      const bx = (P01.sx - P00.sx) / h, by = (P01.sy - P00.sy) / h;
+      ctx.setTransform(dpr*ax, dpr*ay, dpr*bx, dpr*by, dpr*P00.sx, dpr*P00.sy);
+      ctx.drawImage(this.off, 0, 0);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);   // restore for overlays
 
       if (this.overlay) this.overlay(ctx);
       if (this.onChange) this.onChange();
@@ -317,7 +385,11 @@
       const fx = ix + 0.5, fy = iy + 0.5;
       let sky = null;
       if (this.wcs && value !== null) {
-        try { sky = this.wcs(fx, fy); } catch (_) { sky = null; }
+        // map displayed (possibly binned) pixel back to raw FITS coords for WCS
+        const f = this.binFactor;
+        const rfx = f > 1 ? (fx - 0.5) * f + 0.5 : fx;
+        const rfy = f > 1 ? (fy - 0.5) * f + 0.5 : fy;
+        try { sky = this.wcs(rfx, rfy); } catch (_) { sky = null; }
       }
       this.onReadout({
         x: value === null ? null : fx,

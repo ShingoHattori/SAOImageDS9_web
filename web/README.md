@@ -32,6 +32,8 @@ SAOImage DS9 の「基本ビュワー」機能を **ブラウザネイティブ*
   Del で削除、Esc でツール解除
 - **オーバーレイ** — Contour（等値線・レベル数指定、marching squares）、Coordinate grid
   （RA/Dec 等値線）、Crosshair（カーソル十字線）
+- **画像処理** — Smoothing（gaussian / boxcar・半径指定）、Binning（block average, ×2/4/8）、
+  Flip X / Flip Y / Rotate 90°（座標変換として実装、リージョン・オーバーレイも追従）
 - **座標系** — image / fk5 (sexagesimal) / fk5 (degrees) / galactic を切り替えて読み取り
 - **カーソル読み取り** — ピクセル座標・ピクセル値・選択座標系での天球座標
 - **ヘッダ表示** — FITS ヘッダカードをそのまま表示
