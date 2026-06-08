@@ -30,7 +30,7 @@
     this._creating = null;     // region being created
     this._drag = null;         // { mode:'move'|'resize'|'rotate', handle, last }
     this._poly = null;         // polygon under construction
-    viewer.overlay = (ctx) => this.draw(ctx);
+    // drawing is composed by main (overlay order: contour/grid/regions/crosshair)
     viewer.pointerHook = {
       down: (sx, sy, e) => this._down(sx, sy, e),
       move: (sx, sy, e, dragging) => this._move(sx, sy, e, dragging),

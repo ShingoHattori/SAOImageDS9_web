@@ -30,6 +30,8 @@ SAOImage DS9 の「基本ビュワー」機能を **ブラウザネイティブ*
   リサイズ・回転（ellipse/box）・削除、色設定、リージョン一覧、**DS9 region 形式（image座標）の
   import / export**。ツールバーで図形を選び画像上でドラッグ（polygon は頂点クリック→始点クリックで閉じる）。
   Del で削除、Esc でツール解除
+- **オーバーレイ** — Contour（等値線・レベル数指定、marching squares）、Coordinate grid
+  （RA/Dec 等値線）、Crosshair（カーソル十字線）
 - **座標系** — image / fk5 (sexagesimal) / fk5 (degrees) / galactic を切り替えて読み取り
 - **カーソル読み取り** — ピクセル座標・ピクセル値・選択座標系での天球座標
 - **ヘッダ表示** — FITS ヘッダカードをそのまま表示

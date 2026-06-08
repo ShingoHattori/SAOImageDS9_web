@@ -21,8 +21,35 @@
 
   viewer.onChange = () => panels.updateView();
 
-  // ---- regions ----
+  // ---- regions + overlays ----
   const regions = new Regions(viewer, { onChange: renderRegionList });
+  const overlays = new Overlays(viewer);
+  // compose the overlay stack: grid/contour → regions → crosshair
+  viewer.overlay = (ctx) => {
+    overlays.drawFields(ctx);
+    regions.draw(ctx);
+    overlays.drawCrosshair(ctx);
+  };
+
+  $('ovContour').addEventListener('change', e => {
+    overlays.contour.on = e.target.checked;
+    if (e.target.checked) overlays.contour.segs = null;
+    viewer.draw();
+  });
+  $('ovLevels').addEventListener('change', e => {
+    overlays.contour.levels = Math.max(1, Math.min(20, +e.target.value || 5));
+    overlays.contour.segs = null;
+    viewer.draw();
+  });
+  $('ovGrid').addEventListener('change', e => {
+    overlays.grid.on = e.target.checked;
+    if (e.target.checked) overlays.grid.lines = null;
+    viewer.draw();
+  });
+  $('ovCross').addEventListener('change', e => {
+    overlays.cross.on = e.target.checked;
+    viewer.draw();
+  });
 
   document.querySelectorAll('#regionbar .rb-tools button').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -99,6 +126,7 @@
     }
     panels.drawMagnifier(info);
     panels.drawPixelTable(info);
+    if (info && info.inside) overlays.setCursor(info.ix, info.iy);
     updateStatus();
   };
 
@@ -229,6 +257,7 @@
       viewer.setImage(image, wcs);
     }
 
+    overlays.invalidate();
     setupCube(currentHdu);
     syncLimitInputs();
     updateStatus();
@@ -333,6 +362,7 @@
     initViewerFromControls();
     viewer.setImage(image, wcs);
 
+    overlays.invalidate();
     setupCube(hdu);
     syncLimitInputs();
     updateStatus();
@@ -363,6 +393,7 @@
     currentPlane = plane;
     const image = currentHdu.loadImage(plane);
     viewer.setPlane(image);
+    overlays.invalidate();
     $('cubeSlider').value = plane;
     updateCubeLabel();
     if (!viewer.lockScale) syncLimitInputs();
@@ -408,11 +439,13 @@
   $('hduSelect').addEventListener('change', e => showHdu(+e.target.value));
 
   $('scaleSelect').addEventListener('change', e => {
-    viewer.scale = e.target.value; viewer.renderImage(); viewer.draw();
+    viewer.scale = e.target.value; overlays.contour.segs = null;
+    viewer.renderImage(); viewer.draw();
   });
   $('limitSelect').addEventListener('change', e => {
     if (e.target.value === 'user') return;             // user = keep manual values
     viewer.limitMode = e.target.value; viewer.recomputeLimits();
+    overlays.contour.segs = null;
     viewer.renderImage(); viewer.draw(); syncLimitInputs(); updateStatus();
   });
   function applyManualLimits() {
@@ -420,6 +453,7 @@
     if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return;
     viewer.low = lo; viewer.high = hi; viewer.limitMode = 'user';
     $('limitSelect').value = 'user';
+    overlays.contour.segs = null;
     viewer.renderImage(); viewer.draw(); updateStatus();
   }
   $('lowInput').addEventListener('change', applyManualLimits);
@@ -494,6 +528,17 @@
 
   // ---- ?file=…&ch=… query for quick demos ----
   const params = new URLSearchParams(location.search);
+  function applyOverlayParam() {
+    const o = params.get('overlay'); if (!o) return;
+    const set = o.split(',');
+    if (set.includes('contour')) { $('ovContour').checked = true; overlays.contour.on = true; overlays.contour.segs = null; }
+    if (set.includes('grid'))    { $('ovGrid').checked = true; overlays.grid.on = true; overlays.grid.lines = null; }
+    if (set.includes('cross') && viewer.image) {
+      $('ovCross').checked = true; overlays.cross.on = true;
+      overlays.cross.ix = viewer.image.width * 0.5; overlays.cross.iy = viewer.image.height * 0.55;
+    }
+    viewer.draw();
+  }
   const q = params.get('file');
   const framesParam = params.get('frames');
   if (framesParam) {
@@ -533,6 +578,7 @@
           const sidx = parseInt(params.get('select'), 10);
           if (Number.isFinite(sidx) && regions.list[sidx]) regions.select(regions.list[sidx]);
         }
+        applyOverlayParam();
       })
       .catch(() => {});
   }
