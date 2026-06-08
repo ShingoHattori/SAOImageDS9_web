@@ -316,7 +316,49 @@
     $('stFile').textContent = `${frame.name}  —  RGB (R/G/B channels)`;
   }
 
-  function activate3DFrame(frame) { /* implemented in the 3D phase */ }
+  function activate3DFrame(frame) {
+    hdus = []; currentHdu = null; spectral = null;
+    $('hduSelect').disabled = true; $('cubeBar').classList.add('hidden');
+    viewer.mode = '3d';
+    viewer.scale = $('scaleSelect').value;
+    viewer.cmap = $('cmapSelect').value;
+    viewer.invert = $('invertChk').checked;
+    if (frame.view3d) viewer.view3d = frame.view3d;
+    viewer.setVolume(frame.vol, frame.wcs);
+    if (frame.state) { viewer.zoom = frame.state.zoom; viewer.cx = frame.state.cx; viewer.cy = frame.state.cy; viewer.draw(); }
+    const vol = frame.vol;
+    $('stFile').textContent = `${frame.name}  —  3D MIP ${vol.w}×${vol.h}×${vol.d}（ドラッグで回転）`;
+  }
+
+  // Build a volume (Float32, index z*w*h + y*w + x) from a cube image HDU.
+  function buildVolume(hdu) {
+    const w = hdu.width, h = hdu.height, d = hdu.depth;
+    const data = new Float32Array(w * h * d);
+    let min = Infinity, max = -Infinity;
+    for (let z = 0; z < d; z++) {
+      const pl = hdu.loadImage(z);
+      data.set(pl.data, z * w * h);
+      if (pl.min < min) min = pl.min;
+      if (pl.max > max) max = pl.max;
+    }
+    return { data, w, h, d, min, max };
+  }
+  function make3DFrame(vol, wcs, name) {
+    saveActiveFrame();
+    const frame = { type: '3d', name, vol, wcs, view3d: { yaw: 0.6, pitch: 0.5 },
+      state: null, regions: [], regionSel: null };
+    frames.push(frame);
+    activateFrame(frame);
+  }
+  $('new3d').addEventListener('click', () => {
+    if (currentHdu && currentHdu.depth > 1) make3DFrame(buildVolume(currentHdu), null, activeFrame.name + ' 3D');
+    else create3DFromDemo().catch(() => alert('3D 化できるキューブがありません（demo の読み込みにも失敗）'));
+  });
+  async function create3DFromDemo() {
+    const buf = await fetch('samples/cube.fits').then(r => r.arrayBuffer());
+    const hdu = FITS.parse(buf).find(h => h.isImage);
+    make3DFrame(buildVolume(hdu), null, 'cube 3D');
+  }
 
   function gotoFrameIndex(i) {
     if (!frames.length) return;
@@ -699,6 +741,7 @@
   const q = params.get('file');
   const framesParam = params.get('frames');
   if (params.get('rgb') === 'demo') createDemoRGB().catch(() => {});
+  if (params.get('cube3d')) create3DFromDemo().catch(() => {});
   if (framesParam) {
     (async () => {
       for (const u of framesParam.split(',')) {

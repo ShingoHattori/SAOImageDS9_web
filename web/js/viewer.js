@@ -162,8 +162,9 @@
 
     recomputeLimits() {
       if (!this.image) return;
-      const [lo, hi] = global.Scale.limits(
-        this.limitMode, this.image.data, this.image.min, this.image.max);
+      const src = this.mode === '3d' ? this.vol : this.image;
+      if (!src || !src.data) return;
+      const [lo, hi] = global.Scale.limits(this.limitMode, src.data, src.min, src.max);
       this.low = lo;
       this.high = hi > lo ? hi : lo + 1;
     }
@@ -220,7 +221,69 @@
       ctx.putImageData(out, 0, 0);
     }
 
-    _render3D() { /* defined below via prototype assignment */ }
+    // ---- 3D: maximum-intensity-projection of a volume, drag to rotate ----
+    setVolume(vol, wcs) {
+      this.mode = '3d';
+      this.vol = vol;
+      this.wcs = null;                          // projection has no sky WCS
+      const S = Math.ceil(Math.sqrt(vol.w*vol.w + vol.h*vol.h + vol.d*vol.d));
+      this.image = { width: S, height: S, data: null, min: vol.min, max: vol.max };
+      this.off.width = S; this.off.height = S;
+      this.contrast = 1; this.bias = 0.5;
+      const [lo, hi] = global.Scale.limits('99.5', vol.data, vol.min, vol.max);
+      this.low = lo; this.high = hi;
+      this._render3D();
+      this.zoomFit();
+      this.draw();
+    }
+    _render3D() {
+      if (!this.vol) return;
+      const { data, w, h, d } = this.vol;
+      const S = this.off.width;
+      const proj = new Float32Array(S * S).fill(-Infinity);
+      const { yaw, pitch } = this.view3d;
+      const cyaw = Math.cos(yaw), syaw = Math.sin(yaw);
+      const cpit = Math.cos(pitch), spit = Math.sin(pitch);
+      const cx0 = w / 2, cy0 = h / 2, cz0 = d / 2, c = S / 2;
+      for (let z = 0; z < d; z++) {
+        const Zc = z - cz0;
+        for (let y = 0; y < h; y++) {
+          const Yc = y - cy0, base = (z * h + y) * w;
+          for (let x = 0; x < w; x++) {
+            const v = data[base + x];
+            if (!Number.isFinite(v)) continue;
+            const Xc = x - cx0;
+            const X1 = cyaw * Xc + syaw * Zc;        // yaw about Y
+            const Z1 = -syaw * Xc + cyaw * Zc;
+            const Y2 = cpit * Yc - spit * Z1;        // pitch about X (then project)
+            const px = (c + X1) | 0, py = (c - Y2) | 0;
+            if (px < 0 || px >= S || py < 0 || py >= S) continue;
+            const idx = py * S + px;
+            if (v > proj[idx]) proj[idx] = v;
+          }
+        }
+      }
+      const ctx = this.off.getContext('2d');
+      const lut = global.Colormap.build(this.cmap, this.invert);
+      const tf = global.Scale.makeTransfer(this.scale, { data: proj }, this.low, this.high);
+      const lo = this.low, span = (this.high - this.low) || 1;
+      const out = ctx.createImageData(S, S), px = out.data;
+      for (let i = 0; i < S * S; i++) {
+        const v = proj[i], o = i * 4;
+        if (!Number.isFinite(v)) { px[o+3] = 0; continue; }
+        let u = (v - lo) / span; u = u < 0 ? 0 : u > 1 ? 1 : u; u = tf(u);
+        let t = (u - this.bias) * this.contrast + 0.5; t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const k = (t * 255 + 0.5) | 0;
+        px[o] = lut[k*3]; px[o+1] = lut[k*3+1]; px[o+2] = lut[k*3+2]; px[o+3] = 255;
+      }
+      ctx.putImageData(out, 0, 0);
+    }
+    rotate3D(dx, dy) {
+      this.view3d.yaw += dx * 0.01;
+      this.view3d.pitch = Math.max(-1.5, Math.min(1.5, this.view3d.pitch + dy * 0.01));
+      this._render3D();
+      this.draw();
+    }
 
     // ----- view transform -----
     zoomFit() {
@@ -377,6 +440,7 @@
           }
           e.preventDefault(); return;
         }
+        if (this.mode === '3d') { dragging = 'rot3d'; e.preventDefault(); return; }
         if (hook() && hook().down && hook().down(sx, sy, e)) {
           dragging = 'hook'; e.preventDefault(); return;
         }
@@ -391,7 +455,11 @@
       c.addEventListener('mousemove', (e) => {
         const rect = c.getBoundingClientRect();
         const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
-        if (dragging === 'hook') {
+        if (dragging === 'rot3d') {
+          const dx = e.clientX - last.x, dy = e.clientY - last.y;
+          last = { x: e.clientX, y: e.clientY };
+          this.rotate3D(dx, dy);
+        } else if (dragging === 'hook') {
           if (hook() && hook().move) hook().move(sx, sy, e, true);
         } else if (dragging && last) {
           const dx = e.clientX - last.x, dy = e.clientY - last.y;
@@ -428,7 +496,7 @@
       const { ix, iy } = this.screenToImage(sx, sy);
       const col = Math.floor(ix), row = Math.floor(iy);
       let value = null;
-      if (col >= 0 && col < this.image.width && row >= 0 && row < this.image.height) {
+      if (this.image.data && col >= 0 && col < this.image.width && row >= 0 && row < this.image.height) {
         value = this.image.data[row * this.image.width + col];
       }
       // FITS pixel coords are 1-based, centre of first pixel = (1,1)

@@ -76,6 +76,7 @@
   // ---- contour ----
   Overlays.prototype._buildContour = function () {
     const v = this.v, img = v.image;
+    if (!img || !img.data) { this.contour.segs = []; return; }
     const w = img.width, h = img.height;
     const stride = Math.max(1, Math.floor(Math.max(w, h) / 400));   // cap lattice ~400
     const nx = Math.floor(w / stride), ny = Math.floor(h / stride);
