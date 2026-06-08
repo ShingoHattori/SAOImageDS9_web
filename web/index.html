@@ -81,6 +81,7 @@
   <button id="zoomFitBtn" title="Zoom to fit">fit</button>
   <button id="zoom1Btn" title="Zoom 1:1">1:1</button>
   <button id="headerBtn" title="Show FITS header" disabled>header</button>
+  <button id="plotBtn" title="Plots (histogram / cut / radial)" disabled>plot</button>
 </header>
 
 <div id="framebar">
@@ -214,6 +215,25 @@
   <span id="stLimits">low/high: –</span>
 </footer>
 
+<div id="plotModal" class="modal hidden">
+  <div class="modal-box plot-box">
+    <div class="modal-head">
+      <span>Plot —
+        <select id="plotType">
+          <option value="histogram">histogram</option>
+          <option value="hcut">horizontal cut</option>
+          <option value="vcut">vertical cut</option>
+          <option value="radial">radial profile</option>
+        </select>
+        <span id="plotTitle" class="plot-title"></span>
+      </span>
+      <button id="plotClose">×</button>
+    </div>
+    <canvas id="plotCanvas" width="720" height="380"></canvas>
+    <div class="plot-hint">cut/radial はカーソル位置に追従（radial は選択中の circle 中心を優先）</div>
+  </div>
+</div>
+
 <div id="headerModal" class="modal hidden">
   <div class="modal-box">
     <div class="modal-head">
@@ -233,6 +253,7 @@
 <script src="js/panels.js"></script>
 <script src="js/regions.js"></script>
 <script src="js/overlays.js"></script>
+<script src="js/plots.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

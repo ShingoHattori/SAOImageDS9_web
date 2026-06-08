@@ -398,3 +398,13 @@ main {
   white-space: pre;
   color: var(--fg);
 }
+
+/* plot modal */
+.plot-box { width: min(780px, 94vw); height: auto; }
+.modal-head select {
+  background: var(--panel); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px;
+}
+.plot-title { color: var(--muted); font-weight: 400; margin-left: 8px; font-size: 12px; }
+#plotCanvas { display: block; width: 100%; background: #15171b; }
+.plot-hint { padding: 6px 12px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--border); }

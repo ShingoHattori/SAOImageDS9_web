@@ -21,9 +21,20 @@
 
   viewer.onChange = () => panels.updateView();
 
-  // ---- regions + overlays ----
+  // ---- regions + overlays + plots ----
   const regions = new Regions(viewer, { onChange: renderRegionList });
   const overlays = new Overlays(viewer);
+  const plots = new Plots(viewer, {
+    modal: $('plotModal'), canvas: $('plotCanvas'), type: $('plotType'),
+    title: $('plotTitle'),
+  }, () => {
+    const r = regions.selected;     // radial profile centres on a circle region
+    return (r && r.type === 'circle') ? { ix: r.x, iy: r.y, maxR: r.r * 1.4 } : null;
+  });
+  $('plotBtn').addEventListener('click', () => plots.toggle());
+  $('plotType').addEventListener('change', () => plots.render());
+  $('plotClose').addEventListener('click', () => plots.close());
+  $('plotModal').addEventListener('click', e => { if (e.target.id === 'plotModal') plots.close(); });
   // compose the overlay stack: grid/contour → regions → crosshair
   viewer.overlay = (ctx) => {
     overlays.drawFields(ctx);
@@ -150,6 +161,7 @@
     panels.drawMagnifier(info);
     panels.drawPixelTable(info);
     if (info && info.inside) overlays.setCursor(info.ix, info.iy);
+    plots.setCursor(info);
     updateStatus();
   };
 
@@ -259,6 +271,7 @@
     hdus = frame.hdus;
     populateHduSelect();
     $('headerBtn').disabled = false;
+    $('plotBtn').disabled = false;
 
     regions.list = frame.regions;
     regions.selected = frame.regionSel || null;
@@ -620,6 +633,8 @@
         }
         applyImageParam();
         applyOverlayParam();
+        const plotType = params.get('plot');
+        if (plotType) { $('plotType').value = plotType; plots.show(); }
       })
       .catch(() => {});
   }
