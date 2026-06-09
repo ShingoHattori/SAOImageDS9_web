@@ -81,6 +81,35 @@
     URL.revokeObjectURL(a.href);
   };
 
+  // Histogram of an arbitrary value array (e.g. a table column). One-shot view.
+  Plots.prototype.columnHistogram = function (values, label) {
+    this.open = true;
+    this.els.modal.classList.remove('hidden');
+    const cv = this.els.canvas, ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    let lo = Infinity, hi = -Infinity;
+    for (const v of values) if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
+    if (hi === lo) hi = lo + 1;
+    const NB = 128, span = hi - lo, bins = new Float64Array(NB);
+    for (const v of values) {
+      if (!Number.isFinite(v)) continue;
+      let b = Math.floor((v - lo) / span * NB);
+      if (b < 0) b = 0; else if (b >= NB) b = NB - 1;
+      bins[b]++;
+    }
+    const fr = frame(ctx, cv);
+    const [, ymax] = extent(bins);
+    ctx.fillStyle = '#4c8dff';
+    const bw = fr.w / NB;
+    for (let i = 0; i < NB; i++) { const hgt = bins[i] / (ymax || 1) * fr.h; ctx.fillRect(fr.x0 + i * bw, fr.y0 - hgt, Math.max(1, bw - 0.5), hgt); }
+    axisLabels(ctx, fr, lo, hi, 0, ymax, label, 'count');
+    this._title(`column: ${label} — ${values.length} rows`);
+    this._histAxis = null;
+    const centres = []; for (let i = 0; i < NB; i++) centres.push(lo + (i + 0.5) / NB * span);
+    this._last = { title: 'column ' + label, xlabel: label, ylabel: 'count', xs: centres, ys: Array.from(bins) };
+  };
+
   // 1-D Gaussian fit y = B + A*exp(-x^2 / 2σ^2) (centre fixed at x=0).
   function fitGaussian(xs, ys) {
     const pts = [];

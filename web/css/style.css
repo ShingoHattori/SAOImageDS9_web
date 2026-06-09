@@ -172,6 +172,19 @@ body {
 .ftab .fclose { opacity: .6; font-weight: 700; }
 .ftab .fclose:hover { opacity: 1; }
 
+/* ---- table toolbar ---- */
+#tablebar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 5px 10px; background: var(--panel2); border-bottom: 1px solid var(--border);
+}
+#tablebar.hidden { display: none; }
+#tablebar .rb-label { font-weight: 600; color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: .5px; }
+#tablebar label { color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+#tablebar select { background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px; }
+#tablebar button { background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 3px 9px; cursor: pointer; }
+#tablebar button:hover { background: #41454e; }
+#tablebar .hint { color: var(--muted); font-size: 11px; }
+
 /* ---- region toolbar ---- */
 #regionbar {
   display: flex;

@@ -73,7 +73,39 @@
     let n = 1;
     for (let i = 1; i <= naxis; i++) n *= (h['NAXIS' + i] || 0);
     const bp = BITPIX[String(h.BITPIX)];
-    return n * (bp ? bp.bytes : 0);
+    return n * (bp ? bp.bytes : 0) + (h.PCOUNT || 0);   // PCOUNT = table heap
+  }
+
+  // BINTABLE column scalar readers (big-endian, first element of each cell).
+  const TSIZE = { L:1, X:0, B:1, I:2, J:4, K:8, A:1, E:4, D:8, C:8, M:16, P:8, Q:16 };
+  const TREAD = {
+    B: (dv,o)=>dv.getUint8(o), I:(dv,o)=>dv.getInt16(o,false), J:(dv,o)=>dv.getInt32(o,false),
+    K:(dv,o)=>Number(dv.getBigInt64(o,false)), E:(dv,o)=>dv.getFloat32(o,false),
+    D:(dv,o)=>dv.getFloat64(o,false), L:(dv,o)=>dv.getUint8(o),
+  };
+
+  function parseColumns(h) {
+    const nf = h.TFIELDS || 0;
+    const cols = [];
+    let offset = 0;
+    for (let i = 1; i <= nf; i++) {
+      const tform = (h['TFORM' + i] || '').toString().trim();
+      const m = tform.match(/^(\d*)([A-Z])/);
+      const repeat = m && m[1] ? parseInt(m[1], 10) : 1;
+      const type = m ? m[2] : 'A';
+      const width = repeat * (TSIZE[type] || 0);
+      cols.push({
+        index: i - 1, name: (h['TTYPE' + i] || ('col' + i)).toString().trim(),
+        type, repeat, offset, width,
+        tscal: h['TSCAL' + i] != null ? h['TSCAL' + i] : 1,
+        tzero: h['TZERO' + i] != null ? h['TZERO' + i] : 0,
+        tlmin: h['TLMIN' + i], tlmax: h['TLMAX' + i],
+        unit: (h['TUNIT' + i] || '').toString().trim(),
+        numeric: !!TREAD[type],
+      });
+      offset += width;
+    }
+    return cols;
   }
 
   function alignBlock(n) { return Math.ceil(n / BLOCK) * BLOCK; }
@@ -128,19 +160,24 @@
       const header = parseHeader(buf, offset);
       const h = header.map;
       const naxis = h.NAXIS || 0;
-      const isImage = !!(naxis >= 2 && h.NAXIS1 && h.NAXIS2 && BITPIX[String(h.BITPIX)]);
       const xtension = (typeof h.XTENSION === 'string') ? h.XTENSION.trim() : '';
+      const isTable = /^BINTABLE$/i.test(xtension);
+      const isImage = !isTable && !!(naxis >= 2 && h.NAXIS1 && h.NAXIS2 && BITPIX[String(h.BITPIX)]);
 
       hdus.push({
         index: hdus.length,
         header,
         isImage,
+        isTable,
         type: hdus.length === 0 ? 'PRIMARY' : (xtension || 'EXT'),
         width: h.NAXIS1 || 0,
         height: h.NAXIS2 || 0,
         depth: naxis >= 3 ? (h.NAXIS3 || 1) : 1,   // number of slices (cube)
         bitpix: h.BITPIX,
         naxis,
+        columns: isTable ? parseColumns(h) : null,
+        nrows: isTable ? (h.NAXIS2 || 0) : 0,
+        rowBytes: isTable ? (h.NAXIS1 || 0) : 0,
         _buf: buf,
         _planes: {},
       });
@@ -150,13 +187,24 @@
       if (dsize === 0 && naxis === 0 && hdus.length > 0 && offset >= buf.byteLength) break;
     }
 
-    // attach an on-demand image loader (per cube plane, cached)
+    // attach on-demand loaders
     for (const hdu of hdus) {
       hdu.loadImage = function (plane) {
         if (!this.isImage) return null;
         plane = Math.max(0, Math.min(this.depth - 1, plane | 0));
         if (!this._planes[plane]) this._planes[plane] = readImage(this._buf, this.header, plane);
         return this._planes[plane];
+      };
+      // Read a scalar numeric column as a Float64Array (TSCAL/TZERO applied).
+      hdu.readColumn = function (col) {
+        if (!this.isTable) return null;
+        const c = typeof col === 'number' ? this.columns[col] : this.columns.find(k => k.name === col);
+        if (!c || !c.numeric) return null;
+        const dv = new DataView(this._buf, this.header.dataOffset);
+        const read = TREAD[c.type], n = this.nrows, rb = this.rowBytes, off = c.offset;
+        const out = new Float64Array(n);
+        for (let r = 0; r < n; r++) out[r] = c.tzero + c.tscal * read(dv, r * rb + off);
+        return out;
       };
     }
     return hdus;

@@ -242,6 +242,7 @@
   let lockFrames = false;     // share scale/colormap/pan-zoom across frames
   let blinkTimer = null;
   let wcsAlign = null;        // captured sky centre for WCS-aligned frame lock
+  let tableState = null;      // { hdus, hdu, name } for the current binary table
 
   // Align the view to a captured sky position/scale (WCS lock). Returns false
   // when alignment isn't possible (then the caller keeps the pixel-shared view).
@@ -306,13 +307,85 @@
     try { parsed = FITS.parse(buf); }
     catch (err) { alert('FITS の解析に失敗しました: ' + err.message); return; }
     const imageHdus = parsed.filter(h => h.isImage);
-    if (!imageHdus.length) { alert('表示可能な画像 HDU が見つかりませんでした。'); return; }
+    const tableHdus = parsed.filter(h => h.isTable && h.columns && h.columns.some(c => c.numeric));
+    if (!imageHdus.length && !tableHdus.length) { alert('表示可能な画像 HDU / テーブルが見つかりませんでした。'); return; }
+    if (imageHdus.length) {
+      saveActiveFrame();
+      const frame = { type: 'image', name, hdus: parsed, hduIndex: imageHdus[0].index,
+        plane: 0, state: null, regions: [], regionSel: null };
+      frames.push(frame);
+      activateFrame(frame);
+    }
+    if (tableHdus.length) setupTableBar(tableHdus, name);
+    else $('tablebar').classList.add('hidden');
+  }
+
+  // ---- binary tables / event data ----
+  function setupTableBar(tableHdus, name) {
+    tableState = { hdus: tableHdus, hdu: tableHdus[0], name };
+    const sel = $('tableHduSel'); sel.innerHTML = '';
+    tableHdus.forEach((h, i) => { const o = document.createElement('option'); o.value = i; o.textContent = `#${h.index} (${h.nrows} rows)`; sel.appendChild(o); });
+    sel.value = 0;
+    populateTableCols(tableHdus[0]);
+    $('tablebar').classList.remove('hidden');
+  }
+  function populateTableCols(hdu) {
+    tableState.hdu = hdu;
+    const numCols = hdu.columns.filter(c => c.numeric);
+    const fill = (id, preferred) => {
+      const s = $(id); s.innerHTML = '';
+      numCols.forEach(c => { const o = document.createElement('option'); o.value = c.name; o.textContent = c.name + (c.unit ? ` [${c.unit}]` : ''); s.appendChild(o); });
+      const m = preferred && numCols.find(c => c.name.toUpperCase() === preferred);
+      if (m) s.value = m.name;
+    };
+    fill('tableX', 'X'); fill('tableY', 'Y'); fill('tableCol');
+    if (!numCols.some(c => c.name.toUpperCase() === 'X') && numCols[0]) $('tableX').value = numCols[0].name;
+    if (!numCols.some(c => c.name.toUpperCase() === 'Y') && numCols[1]) $('tableY').value = numCols[1].name;
+    $('tableInfo').textContent = `${hdu.nrows} rows, ${hdu.columns.length} cols`;
+  }
+  function buildEventImage(hdu, xName, yName) {
+    const X = hdu.readColumn(xName), Y = hdu.readColumn(yName);
+    if (!X || !Y) return null;
+    const xc = hdu.columns.find(c => c.name === xName), yc = hdu.columns.find(c => c.name === yName);
+    let xmin = xc.tlmin, xmax = xc.tlmax, ymin = yc.tlmin, ymax = yc.tlmax;
+    if (xmin == null || xmax == null) { xmin = Infinity; xmax = -Infinity; for (const v of X) { if (v < xmin) xmin = v; if (v > xmax) xmax = v; } }
+    if (ymin == null || ymax == null) { ymin = Infinity; ymax = -Infinity; for (const v of Y) { if (v < ymin) ymin = v; if (v > ymax) ymax = v; } }
+    const TARGET = 512;
+    const rangeX = (xmax - xmin) || 1, rangeY = (ymax - ymin) || 1;
+    const block = Math.max(rangeX, rangeY) / TARGET || 1;
+    const W = Math.max(1, Math.ceil(rangeX / block)), H = Math.max(1, Math.ceil(rangeY / block));
+    const data = new Float64Array(W * H);
+    for (let i = 0; i < X.length; i++) {
+      const cx = Math.floor((X[i] - xmin) / block), cy = Math.floor((Y[i] - ymin) / block);
+      if (cx >= 0 && cx < W && cy >= 0 && cy < H) data[cy * W + cx]++;
+    }
+    let min = Infinity, max = -Infinity; for (const v of data) { if (v < min) min = v; if (v > max) max = v; }
+    if (!Number.isFinite(min)) { min = 0; max = 1; }
+    return { width: W, height: H, data, min, max };
+  }
+  function makeImageFrameFromImage(img, name) {
+    const pseudo = { index: 0, isImage: true, isTable: false, type: 'IMAGE',
+      width: img.width, height: img.height, depth: 1, bitpix: -64, naxis: 2, columns: null,
+      header: { map: { NAXIS: 2, NAXIS1: img.width, NAXIS2: img.height, BITPIX: -64 }, cards: ['(binned event image)'] },
+      loadImage: () => img, readColumn: () => null };
     saveActiveFrame();
-    const frame = { type: 'image', name, hdus: parsed, hduIndex: imageHdus[0].index,
-      plane: 0, state: null, regions: [], regionSel: null };
+    const frame = { type: 'image', name, hdus: [pseudo], hduIndex: 0, plane: 0, state: null, regions: [], regionSel: null };
     frames.push(frame);
     activateFrame(frame);
   }
+  function doTableBin() {
+    if (!tableState) return;
+    const img = buildEventImage(tableState.hdu, $('tableX').value, $('tableY').value);
+    if (!img) { alert('ビニングに失敗しました（数値列を選択してください）'); return; }
+    makeImageFrameFromImage(img, `${tableState.name} [${$('tableX').value}×${$('tableY').value}]`);
+  }
+  $('tableHduSel').addEventListener('change', e => populateTableCols(tableState.hdus[+e.target.value]));
+  $('tableBin').addEventListener('click', doTableBin);
+  $('tablePlotCol').addEventListener('click', () => {
+    if (!tableState) return;
+    const name = $('tableCol').value, v = tableState.hdu.readColumn(name);
+    if (v) plots.columnHistogram(v, name);
+  });
 
   function activateFrame(frame) {
     stopPlay();
@@ -843,6 +916,9 @@
           const sidx = parseInt(params.get('select'), 10);
           if (Number.isFinite(sidx) && regions.list[sidx]) regions.select(regions.list[sidx]);
         }
+        if (params.get('tablebin') && tableState) doTableBin();
+        const pc = params.get('plotcol');
+        if (pc && tableState) { const v = tableState.hdu.readColumn(pc); if (v) plots.columnHistogram(v, pc); }
         applyImageParam();
         applyOverlayParam();
         const plotType = params.get('plot');
