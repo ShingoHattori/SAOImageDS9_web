@@ -10,16 +10,32 @@
 
   const D2R = Math.PI / 180, R2D = 180 / Math.PI;
 
+  // Supported celestial projections. theta(R): native angular distance from the
+  // reference for a given radius R; radius(theta): the inverse. CAR is handled
+  // separately as a linear (plate-carrée) projection.
+  const PROJ = {
+    TAN: { theta: R => Math.atan(R),         radius: t => Math.tan(t) },
+    SIN: { theta: R => Math.asin(Math.min(1, R)), radius: t => Math.sin(t) },
+    ARC: { theta: R => R,                     radius: t => t },
+    STG: { theta: R => 2 * Math.atan(R / 2),  radius: t => 2 * Math.tan(t / 2) },
+  };
+
   function build(h) {
-    const t1 = (h.CTYPE1 || '').toString();
-    const t2 = (h.CTYPE2 || '').toString();
-    if (!/TAN/.test(t1) || !/TAN/.test(t2)) return null;
+    const t1 = (h.CTYPE1 || '').toString().toUpperCase();
+    const t2 = (h.CTYPE2 || '').toString().toUpperCase();
     if (h.CRPIX1 == null || h.CRPIX2 == null || h.CRVAL1 == null || h.CRVAL2 == null) return null;
+    const m = t1.match(/-([A-Z]{3})$/);
+    const code = m ? m[1] : 'TAN';
+    const isCar = code === 'CAR';
+    const proj = PROJ[code];
+    if (!proj && !isCar) return null;             // unsupported projection
+    if (!/RA|GLON|ELON|LON/.test(t1) || !/DEC|GLAT|ELAT|LAT/.test(t2)) {
+      if (!/TAN|SIN|ARC|STG|CAR/.test(t1)) return null;
+    }
 
     const crpix1 = h.CRPIX1, crpix2 = h.CRPIX2;
     const crval1 = h.CRVAL1, crval2 = h.CRVAL2;
 
-    // CD matrix (deg/pixel). Prefer CDi_j, else CDELT/CROTA2.
     let cd11, cd12, cd21, cd22;
     if (h.CD1_1 != null || h.CD2_2 != null) {
       cd11 = h.CD1_1 || 0; cd12 = h.CD1_2 || 0;
@@ -31,29 +47,58 @@
       cd11 = cdelt1 * cosr;  cd12 = -cdelt2 * sinr;
       cd21 = cdelt1 * sinr;  cd22 = cdelt2 * cosr;
     }
+    const det = cd11 * cd22 - cd12 * cd21;
+    if (det === 0) return null;
+    // inverse CD (deg -> pixel offset)
+    const i11 = cd22 / det, i12 = -cd12 / det, i21 = -cd21 / det, i22 = cd11 / det;
 
     const ra0 = crval1 * D2R, dec0 = crval2 * D2R;
     const sind0 = Math.sin(dec0), cosd0 = Math.cos(dec0);
 
     // pixel (1-based FITS) -> RA/Dec (deg)
-    return function pixToSky(px, py) {
+    const pixToSky = function (px, py) {
       const dx = px - crpix1, dy = py - crpix2;
-      // intermediate world coords (deg) then to radians
-      const xi = (cd11 * dx + cd12 * dy) * D2R;
-      const eta = (cd21 * dx + cd22 * dy) * D2R;
-      // inverse gnomonic
-      const r = Math.sqrt(xi * xi + eta * eta);
-      const c = Math.atan(r);
-      let ra, dec;
-      if (r === 0) { ra = ra0; dec = dec0; }
-      else {
-        const sinc = Math.sin(c), cosc = Math.cos(c);
-        dec = Math.asin(cosc * sind0 + (eta * sinc * cosd0) / r);
-        ra = ra0 + Math.atan2(xi * sinc, r * cosd0 * cosc - eta * sind0 * sinc);
+      const xiDeg = cd11 * dx + cd12 * dy, etaDeg = cd21 * dx + cd22 * dy;
+      let raDeg, decDeg;
+      if (isCar) {
+        raDeg = crval1 + xiDeg; decDeg = crval2 + etaDeg;
+      } else {
+        const xi = xiDeg * D2R, eta = etaDeg * D2R;
+        const r = Math.sqrt(xi * xi + eta * eta);
+        if (r === 0) { raDeg = crval1; decDeg = crval2; }
+        else {
+          const c = proj.theta(r), sinc = Math.sin(c), cosc = Math.cos(c);
+          const dec = Math.asin(cosc * sind0 + (eta * sinc * cosd0) / r);
+          const ra = ra0 + Math.atan2(xi * sinc, r * cosd0 * cosc - eta * sind0 * sinc);
+          raDeg = ra * R2D; decDeg = dec * R2D;
+        }
       }
-      let raDeg = ((ra * R2D) % 360 + 360) % 360;
-      return { ra: raDeg, dec: dec * R2D };
+      return { ra: ((raDeg % 360) + 360) % 360, dec: decDeg };
     };
+
+    // RA/Dec (deg) -> pixel (1-based FITS), for WCS alignment between frames
+    pixToSky.skyToPix = function (raDeg, decDeg) {
+      let xiDeg, etaDeg;
+      if (isCar) {
+        let dra = raDeg - crval1; if (dra > 180) dra -= 360; if (dra < -180) dra += 360;
+        xiDeg = dra; etaDeg = decDeg - crval2;
+      } else {
+        const ra = raDeg * D2R, dec = decDeg * D2R;
+        const A = Math.cos(dec) * Math.sin(ra - ra0);
+        const B = Math.sin(dec) * cosd0 - Math.cos(dec) * sind0 * Math.cos(ra - ra0);
+        const cosT = Math.sin(dec) * sind0 + Math.cos(dec) * cosd0 * Math.cos(ra - ra0);
+        const sinT = Math.sqrt(A * A + B * B);
+        const theta = Math.atan2(sinT, cosT);
+        const R = sinT === 0 ? 0 : proj.radius(theta);
+        const k = sinT === 0 ? 0 : R / sinT;
+        xiDeg = (A * k) * R2D; etaDeg = (B * k) * R2D;
+      }
+      return { x: crpix1 + i11 * xiDeg + i12 * etaDeg, y: crpix2 + i21 * xiDeg + i22 * etaDeg };
+    };
+
+    pixToSky.pixscale = Math.sqrt(Math.abs(det));    // deg/pixel
+    pixToSky.proj = code;
+    return pixToSky;
   }
 
   function fmtRA(deg) {

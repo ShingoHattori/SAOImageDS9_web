@@ -241,6 +241,20 @@
   let activeFrame = null;
   let lockFrames = false;     // share scale/colormap/pan-zoom across frames
   let blinkTimer = null;
+  let wcsAlign = null;        // captured sky centre for WCS-aligned frame lock
+
+  // Align the view to a captured sky position/scale (WCS lock). Returns false
+  // when alignment isn't possible (then the caller keeps the pixel-shared view).
+  function applyWcsAlign(newWcs) {
+    if (!wcsAlign || !newWcs || !newWcs.skyToPix) return false;
+    const p = newWcs.skyToPix(wcsAlign.ra, wcsAlign.dec);   // FITS pixel
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return false;
+    const o = viewer._orient(p.x - 0.5, p.y - 0.5);
+    viewer.cx = o.vx; viewer.cy = o.vy;
+    if (newWcs.pixscale) viewer.zoom = wcsAlign.zoom * (wcsAlign.scale / newWcs.pixscale);
+    viewer.draw();
+    return true;
+  }
 
   function snapshotState() {
     return { zoom: viewer.zoom, cx: viewer.cx, cy: viewer.cy,
@@ -335,7 +349,7 @@
     const wcs = WCS.build(currentHdu.header.map);
     $('hduSelect').value = currentHdu.index;
 
-    if (frame.state && lockFrames) viewer.swapImage(image, wcs);
+    if (frame.state && lockFrames) { viewer.swapImage(image, wcs); applyWcsAlign(wcs); }
     else if (frame.state) { viewer.restore(image, wcs, frame.state); applyStateToControls(frame.state); }
     else { initViewerFromControls(); viewer.setImage(image, wcs); }
 
@@ -405,6 +419,13 @@
     i = (i % frames.length + frames.length) % frames.length;
     const target = frames[i];
     if (target === activeFrame) return;
+    // capture sky centre of the current view for WCS-aligned lock
+    wcsAlign = null;
+    if (lockFrames && viewer.wcs && viewer.wcs.skyToPix) {
+      const ctr = viewer.screenToImage(viewer.canvas.clientWidth / 2, viewer.canvas.clientHeight / 2);
+      const s = viewer.wcs(ctr.ix + 0.5, ctr.iy + 0.5);
+      wcsAlign = { ra: s.ra, dec: s.dec, zoom: viewer.zoom, scale: viewer.wcs.pixscale };
+    }
     saveActiveFrame();
     activateFrame(target);
   }
