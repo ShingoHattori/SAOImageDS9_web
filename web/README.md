@@ -1,9 +1,12 @@
 # DS9 Web Viewer
 
-SAOImage DS9 の「基本ビュワー」機能を **ブラウザネイティブ**（クライアントサイド完結）で
-再現した FITS ビュワーです。サーバーは静的ファイルを配るだけで、FITS の解析・スケーリング・
-カラーマップ・描画はすべてブラウザ内（JavaScript / Canvas）で行います。アップロードした
-ファイルが外部に送られることはありません。
+SAOImage DS9 の主要機能を **ブラウザネイティブ**（クライアントサイド完結）で再現した FITS
+ビュワーです。サーバーは静的ファイルを配るだけで、FITS の解析・スケーリング・カラーマップ・
+描画はすべてブラウザ内（JavaScript / Canvas）で行います。アップロードしたファイルが外部に
+送られることはありません。
+
+**ドキュメント**: 使い方は [USAGE.md](USAGE.md)、DS9 ネイティブ版との機能対応は
+[DS9_MAPPING.md](DS9_MAPPING.md) を参照してください。
 
 ## 機能
 
@@ -39,12 +42,15 @@ SAOImage DS9 の「基本ビュワー」機能を **ブラウザネイティブ*
   （RA/Dec 等値線）、Crosshair（カーソル十字線）
 - **画像処理** — Smoothing（gaussian / boxcar・半径指定）、Binning（block average, ×2/4/8）、
   Flip X / Flip Y / Rotate 90°（座標変換として実装、リージョン・オーバーレイも追従）
-- **プロット** — Histogram（画素値分布）、Horizontal/Vertical cut（カーソル行・列の断面、追従）、
-  Radial profile（中心まわりの方位平均。選択中の circle 中心を優先）。**radial は Gaussian フィット**
-  を重ね、FWHM/σ/peak を表示。**export ボタンでプロット値を CSV 保存**
+- **プロット** — Histogram（画素値分布、**クリックでスケール上下限設定**）、Horizontal/Vertical cut
+  （カーソル行・列の断面、追従）、Radial profile（**Gaussian フィット**で FWHM/σ/peak）、
+  Projection（line リージョンに沿った断面）。**export ボタンで CSV 保存**
+- **バイナリテーブル / イベント** — BINTABLE を認識し、X/Y 列を画像にビニング（イベントファイル表示）、
+  任意列のヒストグラム（`samples/events.fits` サンプル付き）
 - **領域統計** — 選択領域内の npix / sum / mean / median / stddev / min / max / centroid を
   サイドバー Region Stats に表示（circle / box / ellipse / polygon）
-- **座標系** — image / fk5 (sexagesimal) / fk5 (degrees) / galactic を切り替えて読み取り
+- **座標系 / WCS** — image / fk5(sexg) / fk5(deg) / galactic、投影法 TAN/SIN/ARC/STG/CAR、
+  フレーム間の WCS 整列ロック（lock frames）
 - **カーソル読み取り** — ピクセル座標・ピクセル値・選択座標系での天球座標
 - **ヘッダ表示** — FITS ヘッダカードをそのまま表示
 
@@ -87,17 +93,21 @@ docker run --rm -p 8080:80 ds9-web
 | ファイル | 役割 |
 |----------|------|
 | `index.html` | UI レイアウト |
-| `js/fits.js` | FITS パーサ（HDU 分割・ヘッダ・画像読み込み） |
+| `js/fits.js` | FITS パーサ（HDU 分割・ヘッダ・画像読み込み・BINTABLE） |
 | `js/scale.js` | 転送関数と zscale / percentile レンジ推定 |
-| `js/colormap.js` | カラーマップ LUT |
-| `js/wcs.js` | TAN 投影の最小 WCS（カーソル読み取り用） |
-| `js/viewer.js` | Canvas 描画・ズーム/パン・コントラスト/バイアス |
-| `js/main.js` | UI と Viewer の接続 |
+| `js/colormap.js` | DS9 カラーマップ LUT |
+| `js/wcs.js` | WCS（TAN/SIN/ARC/STG/CAR、pix↔sky、galactic） |
+| `js/smoothing.js` | 平滑化（gaussian/boxcar）・ビニング |
+| `js/viewer.js` | Canvas 描画・ズーム/パン・コントラスト/バイアス・RGB/3D・向き |
+| `js/panels.js` | Panner / Magnifier / Colorbar / Pixel Table |
+| `js/regions.js` | リージョン（作成・編集・統計・DS9 形式 I/O） |
+| `js/overlays.js` | Contour / Grid / Crosshair（marching squares） |
+| `js/plots.js` | Histogram / cut / radial(fit) / projection / 列ヒストグラム |
+| `js/main.js` | UI と各モジュールの接続 |
 
 ## 制限
 
-DS9 の主要なビュワー機能（表示・スケール・カラーマップ・キューブ・リージョン・フレーム・
-オーバーレイ・画像処理・プロット）をブラウザネイティブに再実装したものです。次は対象外です：
-外部連携（XPA / SAMP）、画像サーバ取得（DSS 等）、バイナリテーブル/カタログ。3D はボリューム
-レンダラ相当の MIP 簡易版（本家のフル機能版ではない）。WCS は TAN 投影の簡易実装（カーソル
-読み取り・グリッド用）で、厳密な測地計算用ではありません。
+DS9 の主要なビュワー＋解析機能をブラウザネイティブに再実装したものです。次は対象外です：
+外部連携（XPA / SAMP）、画像サーバ取得（DSS 等）、カタログ、ASCII テーブル（BINTABLE は対応）。
+3D はフルボリュームレンダラではなく MIP/mean/sum 投影。WCS は TAN/SIN/ARC/STG/CAR の5投影
+（全投影網羅ではない）で、厳密な測地計算用ではありません。
