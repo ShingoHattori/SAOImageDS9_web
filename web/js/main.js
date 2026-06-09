@@ -30,11 +30,27 @@
   }, () => {
     const r = regions.selected;     // radial profile centres on a circle region
     return (r && r.type === 'circle') ? { ix: r.x, iy: r.y, maxR: r.r * 1.4 } : null;
+  }, () => {
+    const r = regions.selected;     // projection runs along a line region
+    return (r && r.type === 'line') ? { x1: r.x1, y1: r.y1, x2: r.x2, y2: r.y2 } : null;
   });
   $('plotBtn').addEventListener('click', () => plots.toggle());
   $('plotType').addEventListener('change', () => plots.render());
   $('plotClose').addEventListener('click', () => plots.close());
   $('plotExport').addEventListener('click', () => plots.exportData());
+  // histogram: click sets Low, Shift+click sets High (DS9 Scale-Parameters style)
+  $('plotCanvas').addEventListener('click', e => {
+    if ($('plotType').value !== 'histogram' || !plots._histAxis) return;
+    const cv = $('plotCanvas'), rect = cv.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * (cv.width / rect.width);
+    const a = plots._histAxis;
+    const val = a.lo + (px - a.x0) / (a.x1 - a.x0) * a.span;
+    if (e.shiftKey) { if (val > viewer.low) viewer.high = val; }
+    else { if (val < viewer.high) viewer.low = val; }
+    viewer.limitMode = 'user'; $('limitSelect').value = 'user';
+    overlays.contour.segs = null;
+    viewer.renderImage(); viewer.draw(); syncLimitInputs(); updateStatus(); plots.render();
+  });
   $('plotModal').addEventListener('click', e => { if (e.target.id === 'plotModal') plots.close(); });
   // compose the overlay stack: grid/contour → regions → crosshair
   viewer.overlay = (ctx) => {
@@ -144,6 +160,7 @@
       ul.appendChild(li);
     });
     renderRegionStats();
+    if (plots.open) plots.render();    // projection/radial follow the selection
   }
   function renderRegionStats() {
     const el = $('regionStats');
@@ -294,6 +311,7 @@
     if (frame.type === 'rgb') activateRGBFrame(frame);
     else if (frame.type === '3d') activate3DFrame(frame);
     else activateImageFrame(frame);
+    $('proj3d').classList.toggle('hidden', frame.type !== '3d');
 
     overlays.invalidate();
     syncLimitInputs();
@@ -377,6 +395,10 @@
     const hdu = FITS.parse(buf).find(h => h.isImage);
     make3DFrame(buildVolume(hdu), null, 'cube 3D');
   }
+  $('proj3d').addEventListener('change', e => {
+    viewer.view3d.method = e.target.value;
+    viewer._render3D(); viewer.draw();
+  });
 
   function gotoFrameIndex(i) {
     if (!frames.length) return;
@@ -759,7 +781,10 @@
   const q = params.get('file');
   const framesParam = params.get('frames');
   if (params.get('rgb') === 'demo') createDemoRGB().catch(() => {});
-  if (params.get('cube3d')) create3DFromDemo().catch(() => {});
+  if (params.get('cube3d')) create3DFromDemo().then(() => {
+    const m = params.get('proj3d');
+    if (m) { $('proj3d').value = m; viewer.view3d.method = m; viewer._render3D(); viewer.draw(); }
+  }).catch(() => {});
   if (framesParam) {
     (async () => {
       for (const u of framesParam.split(',')) {

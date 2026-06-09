@@ -60,7 +60,7 @@
       this.mode = 'image';        // 'image' | 'rgb' | '3d'
       this.rgb = null;            // { red:{image,low,high}, green:{...}, blue:{...} }
       this.vol = null;            // 3D volume { data, w, h, d, min, max }
-      this.view3d = { yaw: 0.6, pitch: 0.5 };
+      this.view3d = { yaw: 0.6, pitch: 0.5, method: 'mip' };
 
       this.scale = 'linear';
       this.limitMode = 'zscale';
@@ -240,7 +240,9 @@
       if (!this.vol) return;
       const { data, w, h, d } = this.vol;
       const S = this.off.width;
-      const proj = new Float32Array(S * S).fill(-Infinity);
+      const method = this.view3d.method || 'mip';
+      const proj = new Float32Array(S * S).fill(method === 'mip' ? -Infinity : 0);
+      const cnt = method === 'mean' ? new Int32Array(S * S) : null;
       const { yaw, pitch } = this.view3d;
       const cyaw = Math.cos(yaw), syaw = Math.sin(yaw);
       const cpit = Math.cos(pitch), spit = Math.sin(pitch);
@@ -259,10 +261,14 @@
             const px = (c + X1) | 0, py = (c - Y2) | 0;
             if (px < 0 || px >= S || py < 0 || py >= S) continue;
             const idx = py * S + px;
-            if (v > proj[idx]) proj[idx] = v;
+            if (method === 'mip') { if (v > proj[idx]) proj[idx] = v; }
+            else { proj[idx] += v; if (cnt) cnt[idx]++; }
           }
         }
       }
+      if (method === 'mip') { for (let i = 0; i < proj.length; i++) if (proj[i] === -Infinity) proj[i] = NaN; }
+      else if (method === 'mean') { for (let i = 0; i < proj.length; i++) proj[i] = cnt[i] ? proj[i] / cnt[i] : NaN; }
+      else { for (let i = 0; i < proj.length; i++) if (proj[i] === 0) proj[i] = NaN; }
       const ctx = this.off.getContext('2d');
       const lut = global.Colormap.build(this.cmap, this.invert);
       const tf = global.Scale.makeTransfer(this.scale, { data: proj }, this.low, this.high);

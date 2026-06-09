@@ -8,10 +8,11 @@
 (function (global) {
   'use strict';
 
-  function Plots(viewer, els, getCenter) {
+  function Plots(viewer, els, getCenter, getLine) {
     this.v = viewer;
     this.els = els;
     this.getCenter = getCenter;     // () -> {ix,iy,maxR}|null  (from regions)
+    this.getLine = getLine;         // () -> {x1,y1,x2,y2}|null  (line region)
     this.cursor = null;
     this.open = false;
   }
@@ -39,6 +40,30 @@
     else if (t === 'hcut') this._cut(ctx, cv, 'h');
     else if (t === 'vcut') this._cut(ctx, cv, 'v');
     else if (t === 'radial') this._radial(ctx, cv);
+    else if (t === 'projection') this._projection(ctx, cv);
+  };
+
+  // ---- projection: value sampled along the selected line region ----
+  Plots.prototype._projection = function (ctx, cv) {
+    const line = this.getLine && this.getLine();
+    if (!line) { frame(ctx, cv); this._title('projection — line リージョンを選択'); return; }
+    const { width: w, height: h, data } = this.v.image;
+    const { x1, y1, x2, y2 } = line;
+    const len = Math.hypot(x2 - x1, y2 - y1);
+    const N = Math.max(2, Math.round(len));
+    const ys = [];
+    for (let i = 0; i <= N; i++) {
+      const t = i / N, ix = x1 + (x2 - x1) * t, iy = y1 + (y2 - y1) * t;
+      const col = Math.floor(ix), row = Math.floor(iy);
+      ys.push((data && col >= 0 && col < w && row >= 0 && row < h) ? data[row * w + col] : NaN);
+    }
+    const fr = frame(ctx, cv);
+    const [ymin, ymax] = extent(ys);
+    plotLine(ctx, fr, null, ys, 0, len, ymin, ymax, '#46d063');
+    axisLabels(ctx, fr, 0, len, ymin, ymax, 'distance (pixel)', 'value');
+    this._title(`projection — length ${len.toFixed(1)} px`);
+    this._last = { title: 'projection', xlabel: 'distance', ylabel: 'value',
+      xs: ys.map((_, i) => i / N * len), ys };
   };
 
   // Export the current plot's data as CSV text and trigger a download.
@@ -170,7 +195,16 @@
       const hgt = bins[i] / (ymax || 1) * fr.h;
       ctx.fillRect(fr.x0 + i * bw, fr.y0 - hgt, Math.max(1, bw - 0.5), hgt);
     }
-    axisLabels(ctx, fr, lo, hi, 0, ymax, 'pixel value', 'count');
+    // current Low/High markers (for click-to-set feedback)
+    const mark = (val, col) => {
+      const X = fr.x0 + (val - lo) / span * fr.w;
+      if (X < fr.x0 || X > fr.x1) return;
+      ctx.strokeStyle = col; ctx.setLineDash([3, 2]); ctx.beginPath();
+      ctx.moveTo(X, fr.y1); ctx.lineTo(X, fr.y0); ctx.stroke(); ctx.setLineDash([]);
+    };
+    mark(v.low, '#4c8dff'); mark(v.high, '#ff6b6b');
+    this._histAxis = { x0: fr.x0, x1: fr.x1, lo, span };
+    axisLabels(ctx, fr, lo, hi, 0, ymax, 'pixel value (click=Low, Shift+click=High)', 'count');
     this._title(`histogram — ${data.length} px, ${NB} bins`);
     const centres = []; for (let i = 0; i < NB; i++) centres.push(lo + (i + 0.5) / NB * span);
     this._last = { title: 'histogram', xlabel: 'value', ylabel: 'count', xs: centres, ys: Array.from(bins) };
